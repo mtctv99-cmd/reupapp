@@ -38,6 +38,19 @@ def _bundled_bin(name: str) -> str | None:
 
 def ensure_env_paths() -> None:
     """Tự động thêm thư mục bin nhúng vào PATH và cấu hình pydub."""
+    if sys.platform == "win32":
+        import subprocess
+        _orig = getattr(subprocess, "_orig_silent_popen", None)
+        if not _orig:
+            subprocess._orig_silent_popen = subprocess.Popen
+            def _silent_popen(*args, **kwargs):
+                if 'creationflags' not in kwargs:
+                    kwargs['creationflags'] = 0x08000000
+                else:
+                    kwargs['creationflags'] |= 0x08000000
+                return subprocess._orig_silent_popen(*args, **kwargs)
+            subprocess.Popen = _silent_popen
+
     bin_dir = get_bin_dir()
     if bin_dir:
         bin_str = str(bin_dir.resolve())

@@ -7,8 +7,18 @@ import sys
 import threading
 import time
 
-# ponytail: Patch ProactorEventLoop WinError 10054 on Windows
+# ponytail: Global monkeypatch to prevent console window popup (flashing) on Windows
 if sys.platform == 'win32':
+    import subprocess
+    _orig_popen = subprocess.Popen
+    def _silent_popen(*args, **kwargs):
+        if 'creationflags' not in kwargs:
+            kwargs['creationflags'] = 0x08000000  # CREATE_NO_WINDOW
+        else:
+            kwargs['creationflags'] |= 0x08000000
+        return _orig_popen(*args, **kwargs)
+    subprocess.Popen = _silent_popen
+
     import asyncio
     try:
         from asyncio.proactor_events import _ProactorBasePipeTransport
