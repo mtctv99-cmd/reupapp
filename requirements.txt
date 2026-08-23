@@ -1,0 +1,17 @@
+customtkinter>=5.2.0
+fastapi
+uvicorn
+Pillow
+httpx
+yt-dlp
+rapidocr-onnxruntime
+pywebview
+pydub
+
+# FunASR
+funasr
+modelscope
+gtts
+
+# Audio separation (tách nhạc nền)
+demucs

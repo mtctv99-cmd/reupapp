@@ -1,0 +1,73 @@
+{
+  "download_dir": "C:\\Users\\MaiThanhChu\\AppData\\Roaming\\SeverDesktop\\downloads",
+  "output_dir": "C:\\Users\\MaiThanhChu\\Downloads\\New folder",
+  "stt_provider": "funasr",
+  "source_language": "zh",
+  "target_language": "vi",
+  "remove_sub": true,
+  "video_speed": 1.0,
+  "original_volume": 100,
+  "aspect_ratio": "original",
+  "logo_path": "",
+  "logo_position": "top_right",
+  "logo_opacity": 0.8,
+  "sub_font": "Arial",
+  "sub_font_size": 38,
+  "sub_style": "yellow_black",
+  "stt_device": "cpu",
+  "bbdown_path": "C:\\Users\\MaiThanhChu\\Downloads\\sever_desktop-20260729T020001Z-1-001\\sever_desktop\\bin\\bbdown.exe",
+  "bbdown_cookie": "",
+  "ytdlp_path": "C:\\Users\\MaiThanhChu\\Downloads\\sever_desktop-20260729T020001Z-1-001\\sever_desktop\\bin\\yt-dlp.exe",
+  "ffmpeg_path": "C:\\Users\\MaiThanhChu\\Downloads\\sever_desktop-20260729T020001Z-1-001\\sever_desktop\\bin\\ffmpeg.exe",
+  "ffprobe_path": "C:\\Users\\MaiThanhChu\\Downloads\\sever_desktop-20260729T020001Z-1-001\\sever_desktop\\bin\\ffprobe.exe",
+  "translate_provider": {
+    "url": "https://gemini.maika.sbs/v1",
+    "api_key": "none",
+    "models": [
+      "gemini-flash-lite",
+      "gemini-3.5-flash-lite"
+    ]
+  },
+  "translate_tiers": [
+    {
+      "provider": "gemini_stealth",
+      "model": "gemini-flash-lite",
+      "label": "Tier 1: gemini-flash-lite (local, free)"
+    },
+    {
+      "provider": "openai",
+      "url": "https://gemini.maika.sbs/v1",
+      "model": "gemini-flash-lite",
+      "label": "Tier 2: gemini-flash-lite (provider)"
+    },
+    {
+      "provider": "openai",
+      "url": "https://gemini.maika.sbs/v1",
+      "model": "gemini-3.5-flash-lite",
+      "label": "Tier 3: gemini-3.5-flash-lite (provider)"
+    },
+    {
+      "provider": "google",
+      "model": "google",
+      "label": "Tier 4: Google Dịch"
+    }
+  ],
+  "tts_provider": {
+    "url": "https://tts.maika.sbs",
+    "api_key": "omni-secret-key-123",
+    "voices": [
+      "ngoc_huyen",
+      "ngoc_huyen"
+    ]
+  },
+  "tts_servers": [
+    {
+      "url": "https://tts.maika.sbs",
+      "api_key": "omni-secret-key-123",
+      "voice": "ngoc_huyen"
+    }
+  ],
+  "target_lang": "vi",
+  "test_param": "123",
+  "custom_key": "test_val"
+}

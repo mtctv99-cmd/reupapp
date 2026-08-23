@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sever Dub Studio Pro</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+
+    <!-- Header -->
+    <div class="custom-titlebar">
+      <div class="titlebar-drag-area">
+        <span class="titlebar-title">SEVER DUB STUDIO PRO</span>
+      </div>
+      <div class="titlebar-controls">
+        <button id="btn-open-settings" class="titlebar-btn-refresh" title="Đăng nhập Bilibili">⚙️</button>
+        <button id="btn-open-concat" class="titlebar-btn-concat">🎬 Ghép Video</button>
+        <button id="btn-refresh" class="titlebar-btn-refresh">🔄</button>
+      </div>
+    </div>
+
+    <!-- Main Workspace -->
+    <main class="workspace full-workspace single-screen-layout">
+
+      <!-- LEFT: Studio Form -->
+      <section class="card hero-card col-left">
+
+        <!-- Pipeline Tracker (Gọn / Ẩn khi chưa chạy) -->
+        <div id="tracker-panel" class="tracker-panel-inline tracker-collapsed">
+          <div class="tracker-header-line" id="tracker-header-toggle" title="Nhấn để Hiện / Ẩn chi tiết tiến trình 8 bước">
+            <span class="tracker-title-tag">⚡ Pipeline (8 bước)</span>
+            <span id="tracker-status" class="tracker-status">Sẵn sàng</span>
+            <span id="tracker-elapsed" class="tracker-elapsed">00:00</span>
+            <span id="tracker-pct" class="tracker-pct">0%</span>
+            <button id="btn-cancel" class="btn-danger btn-sm hidden" style="margin-left: 6px;">✕ Hủy</button>
+            <button id="btn-toggle-tracker" class="btn-tracker-toggle" title="Thu gọn / Mở rộng">▼</button>
+          </div>
+          <div class="progress-bar-bg"><div id="progress-fill" class="progress-fill" style="width:0%"></div></div>
+          
+          <div id="tracker-body" class="tracker-body">
+            <div class="steps-grid">
+              <div class="step-node" data-step="1"><div class="node-icon">📥</div><span class="node-name">Download</span></div>
+              <div class="step-node" data-step="2"><div class="node-icon">✨</div><span class="node-name">Watermark</span></div>
+              <div class="step-node" data-step="3"><div class="node-icon">🎵</div><span class="node-name">Chunking</span></div>
+              <div class="step-node" data-step="4"><div class="node-icon">🎙️</div><span class="node-name">STT</span></div>
+              <div class="step-node" data-step="5"><div class="node-icon">🌐</div><span class="node-name">Dịch</span></div>
+              <div class="step-node" data-step="6"><div class="node-icon">🗣️</div><span class="node-name">TTS</span></div>
+              <div class="step-node" data-step="7"><div class="node-icon">🎬</div><span class="node-name">Sub</span></div>
+              <div class="step-node" data-step="8"><div class="node-icon">📦</div><span class="node-name">Xuất</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Unified Input Section -->
+        <div class="studio-input-group">
+          <!-- Link Input & Launch Action -->
+          <div class="studio-input-row">
+            <span class="input-prefix-icon">🌐</span>
+            <input type="text" id="input-url" class="hero-url-input" placeholder="Dán link video vào đây (Bilibili, TikTok, Douyin, Kuaishou, Direct MP4)..." />
+            <button id="btn-paste" class="btn-input-action" title="Dán link từ clipboard">📋</button>
+            <button id="btn-start" class="btn-input-run" title="Khởi chạy pipeline thuyết minh">▶ Chạy</button>
+          </div>
+
+          <!-- Output Folder Selector -->
+          <div class="studio-input-row">
+            <span class="input-prefix-icon">📂</span>
+            <input type="text" id="input-output-dir" class="hero-url-input" placeholder="Nơi lưu video kết quả (nhấn Chọn Thư Mục bên cạnh)..." />
+            <button id="btn-choose-output-dir" class="btn-hero-paste" style="background: linear-gradient(135deg, #2563eb, #1d4ed8);" title="Chọn thư mục lưu trên máy tính">📂 Chọn Thư Mục</button>
+          </div>
+        </div>
+
+        <!-- Config Grid (Compact) -->
+        <div class="studio-config-section">
+          <div class="section-subtitle">⚙️ Cấu Hình Video & Thuyết Minh</div>
+          <div class="config-cards-grid">
+            <div class="config-card">
+              <div class="config-card-header"><span class="config-icon">📐</span><span class="config-card-title">Tỉ Lệ Khung Hình</span></div>
+              <select id="select-aspect-ratio" class="custom-select">
+                <option value="original" selected>✨ Giữ Gốc (100%)</option>
+                <option value="16:9_720p">YouTube Ngang 16:9</option>
+                <option value="3:4_720p">Facebook 3:4</option>
+                <option value="9:16_720p">TikTok Dọc 9:16</option>
+              </select>
+            </div>
+
+            <div class="config-card">
+              <div class="config-card-header"><span class="config-icon">🗣️</span><span class="config-card-title">Giọng Thuyết Minh</span></div>
+              <select id="select-voice" class="custom-select">
+                <option value="BV074_streaming" selected>Nữ TikTok (BV074_streaming)</option>
+                <option value="BV001_streaming">Nam TikTok (BV001_streaming)</option>
+                <option value="ngoc_huyen">Ngọc Huyền (OmniVoice)</option>
+              </select>
+            </div>
+
+            <div class="config-card">
+              <div class="config-card-header"><span class="config-icon">💬</span><span class="config-card-title">Màu & Phụ Đề</span></div>
+              <select id="select-sub-style" class="custom-select">
+                <option value="white_black" selected>⚪ Trắng Viền Đen</option>
+                <option value="yellow_black">🟡 Vàng Viền Đen</option>
+                <option value="white_box">⬛ Trắng Nền Đen</option>
+                <option value="yellow_box">🟨 Vàng Nền Đen</option>
+              </select>
+            </div>
+
+            <div class="config-card">
+              <div class="config-card-header"><span class="config-icon">⚡</span><span class="config-card-title">Tốc Độ Video</span></div>
+              <div class="speed-slider-row">
+                <input type="range" id="speed-slider" class="speed-slider" min="0.5" max="1.5" step="0.05" value="1.0" />
+                <span id="speed-value" class="speed-value">1.00x</span>
+              </div>
+            </div>
+
+            <div class="config-card">
+              <div class="config-card-header"><span class="config-icon">🔊</span><span class="config-card-title">Âm Thanh Gốc</span></div>
+              <div class="speed-slider-row">
+                <input type="range" id="volume-slider" class="speed-slider" min="0" max="100" step="1" value="100" />
+                <span id="volume-value" class="speed-value">100%</span>
+              </div>
+            </div>
+
+            <div class="config-card">
+              <div class="config-card-header"><span class="config-icon">🖼️</span><span class="config-card-title">Logo Thương Hiệu</span></div>
+              <div class="logo-config-row">
+                <div class="logo-path-box">
+                  <input type="text" id="input-logo-path" class="custom-input-readonly" placeholder="Chọn file Logo..." readonly />
+                  <button id="btn-browse-logo" class="btn-browse">📁 Chọn</button>
+                  <input type="file" id="input-logo-file" accept="image/png, image/jpeg, image/webp" style="display:none" />
+                </div>
+                <select id="select-logo-pos" class="custom-select-mini" style="width:85px">
+                  <option value="top_right">Trên Phải</option>
+                  <option value="top_left">Trên Trái</option>
+                  <option value="bottom_right">Dưới Phải</option>
+                  <option value="bottom_left">Dưới Trái</option>
+                </select>
+                <select id="select-logo-opacity" class="custom-select-mini" style="width:55px">
+                  <option value="0.5">50%</option><option value="0.6">60%</option>
+                  <option value="0.7">70%</option><option value="0.8" selected>80%</option>
+                  <option value="0.9">90%</option><option value="1.0">100%</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Realtime Pipeline Log at Bottom of Left Column -->
+        <details id="log-panel" class="log-panel" open>
+          <summary class="log-panel-summary">📋 Nhật ký xử lý thời gian thực</summary>
+          <pre id="log-output" class="log-output">Chưa có hoạt động.</pre>
+        </details>
+      </section>
+
+      <!-- RIGHT: Preview & Jobs Panel -->
+      <section class="col-right">
+        <!-- Jobs List Card (Full Height) -->
+        <div class="card jobs-card">
+          <div class="jobs-header flex-between">
+            <div class="flex-align-gap">
+              <span class="section-title">📋 Lịch Sử Xử Lý</span>
+              <span id="job-count-badge" class="badge-count">0</span>
+            </div>
+            <div class="flex-align-gap">
+              <button id="btn-concat-selected" class="btn-primary btn-sm" title="Ghép các video đã chọn">🎬 Ghép (<span id="selected-count">0</span>)</button>
+              <button id="btn-clear-jobs" class="btn-danger btn-sm" title="Xóa tất cả lịch sử jobs">🗑️ Xóa hết</button>
+            </div>
+          </div>
+          <div id="jobs-list" class="jobs-scroll-area">
+            <!-- Job item template injected via JS -->
+            <div class="empty-state">
+              <p>Chưa có job nào. Hãy dán link video và khởi chạy pipeline!</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Settings Modal — Account & TTS Config -->
+  <div id="modal-settings" class="modal-overlay hidden">
+    <div class="modal-card modal-card-settings">
+      <div class="modal-header flex-between">
+        <div class="flex-align-gap"><span class="modal-icon">⚙️</span><h3 class="modal-title-blue">Quản Lý Tài Khoản & Cấu Hình</h3></div>
+        <button id="btn-close-settings" class="btn-icon-close">✕</button>
+      </div>
+      <div class="modal-body" style="overflow-y:auto">
+
+        <!-- Tabs Navigation -->
+        <div class="settings-tabs-bar">
+          <button id="tab-btn-bili" class="settings-tab active">📺 Bilibili</button>
+          <button id="tab-btn-tiktok" class="settings-tab">🎵 TikTok TTS</button>
+        </div>
+
+        <!-- TAB 1: Bilibili -->
+        <div id="tab-content-bili" class="settings-content active">
+          <!-- Login Status -->
+          <div id="bili-status-card" class="bili-status-card">
+            <div class="bili-status-icon" id="bili-status-icon">🔒</div>
+            <div class="bili-status-info">
+              <div id="bili-status-text" class="bili-status-text">Đang kiểm tra...</div>
+              <div id="bili-status-detail" class="bili-status-detail"></div>
+            </div>
+            <button id="btn-bili-logout" class="btn-danger btn-sm hidden">Đăng xuất</button>
+          </div>
+
+          <!-- QR Code Login -->
+          <div class="settings-section-label">📱 Đăng Nhập Bằng QR Code</div>
+          <div class="bili-qr-section">
+            <div id="bili-qr-box" class="bili-qr-box">
+              <div id="bili-qr-placeholder" class="bili-qr-placeholder">
+                <p>Nhấn nút bên dưới để tạo QR code</p>
+              </div>
+              <img id="bili-qr-img" class="bili-qr-img hidden" alt="Bilibili QR" />
+            </div>
+            <div id="bili-qr-hint" class="bili-qr-hint hidden">
+              Mở app <strong>Bilibili</strong> → Quét QR → Xác nhận đăng nhập
+            </div>
+            <div id="bili-qr-countdown" class="bili-qr-countdown hidden"></div>
+            <button id="btn-bili-create-qr" class="btn-primary">📱 Tạo QR Code</button>
+          </div>
+
+          <hr class="divider" />
+
+          <!-- Manual Cookie -->
+          <div class="settings-section-label">🍪 Nhập Cookie Bilibili Thủ Công</div>
+          <p class="text-sub" style="margin-bottom:4px">Dán cookie từ trình duyệt (F12 → Application → Cookies → bilibili.com)</p>
+          <textarea id="bili-cookie-input" class="bili-cookie-textarea" rows="2" placeholder="DedeUserID=xxx; SESSDATA=xxx; bili_jct=xxx"></textarea>
+          <button id="btn-bili-save-cookie" class="btn-primary btn-sm" style="margin-top:6px">💾 Lưu Cookie Bilibili</button>
+        </div>
+
+        <!-- TAB 2: TikTok TTS -->
+        <div id="tab-content-tiktok" class="settings-content">
+          <div class="settings-section-label">🎵 Tài Khoản TikTok (TTS Local)</div>
+          <p class="text-sub" style="margin-bottom:8px">Đăng nhập nhiều tài khoản TikTok để xoay vòng lượt đọc, chống rate-limit khi tạo thuyết minh.</p>
+
+          <div id="tiktok-accounts-list" class="concat-files-list" style="min-height:60px"></div>
+
+          <div class="flex-align-gap" style="margin-top:8px">
+            <button id="btn-tiktok-login" class="btn-primary btn-sm">➕ Mở Trình Duyệt Đăng Nhập</button>
+            <button id="btn-tiktok-refresh" class="btn-secondary btn-sm">🔄 Làm mới danh sách</button>
+          </div>
+
+          <hr class="divider" style="margin-top:12px" />
+
+          <div class="settings-section-label">🍪 Thêm Session ID Thủ Công</div>
+          <div class="flex-align-gap" style="margin-top:4px">
+            <input type="text" id="input-tiktok-sessionid" class="custom-input-readonly" style="flex:1" placeholder="Dán cookie sessionid TikTok vào đây..." />
+            <button id="btn-tiktok-save-session" class="btn-primary btn-sm">💾 Thêm</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Error Modal -->
+  <div id="modal-error" class="modal-overlay hidden">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header flex-between">
+        <div class="flex-align-gap"><span class="modal-icon">⚠️</span><h3 class="modal-title-blue">Thông báo</h3></div>
+        <button id="btn-close-modal" class="btn-icon-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p id="modal-error-msg" class="error-msg-text"></p>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-error-ok" class="btn-primary btn-sm">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Concat Modal -->
+  <div id="modal-concat" class="modal-overlay hidden">
+    <div class="modal-card modal-card-concat">
+      <div class="modal-header flex-between">
+        <div class="flex-align-gap"><span class="modal-icon">🎬</span><h3 class="modal-title-blue">Ghép Video</h3></div>
+        <button id="btn-close-concat-modal" class="btn-icon-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="concat-dropzone" class="concat-dropzone">
+          <p class="concat-dropzone-text">📂 Kéo thả video vào đây</p>
+          <button id="btn-browse-concat-files" class="btn-secondary btn-sm">📁 Chọn Video</button>
+          <input type="file" id="input-concat-files" accept="video/*" multiple style="display:none" />
+        </div>
+        <div class="flex-between concat-list-header">
+          <span class="settings-sub-label">Danh sách ghép (<span id="concat-count">0</span>)</span>
+        </div>
+        <div id="concat-files-list" class="concat-files-list"></div>
+        <div id="concat-status-msg" class="concat-status-msg text-sub">Cần chọn ít nhất 2 video</div>
+        <button id="btn-start-concat" class="btn-hero-launch" disabled>🚀 BẮT ĐẦU GHÉP</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="loading-overlay" class="loading-overlay hidden">
+    <div class="loading-spinner"></div>
+    <span class="loading-text">Dang xu ly...</span>
+  </div>
+
+  <!-- Toast Notifications -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

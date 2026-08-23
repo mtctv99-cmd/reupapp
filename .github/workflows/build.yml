@@ -1,0 +1,63 @@
+name: Build Windows exe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'sever_desktop/**'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        working-directory: sever_desktop
+        run: |
+          pip install customtkinter Pillow httpx pyinstaller
+
+      - name: Build exe
+        working-directory: sever_desktop
+        run: |
+          pyinstaller --onefile --windowed --name "SeverDesktopV1" `
+            --hidden-import core.config `
+            --hidden-import core.db `
+            --hidden-import core.ffmpeg `
+            --hidden-import pipeline.step01_download `
+            --hidden-import pipeline.step02_watermark `
+            --hidden-import pipeline.step03_audio_chunk `
+            --hidden-import pipeline.step04_stt `
+            --hidden-import pipeline.step05_translate `
+            --hidden-import pipeline.step06_tts `
+            --hidden-import pipeline.step07_overlay `
+            --hidden-import pipeline.step08_concat `
+            --hidden-import pipeline.orchestrator `
+            --hidden-import ui.app `
+            --hidden-import customtkinter `
+            --hidden-import darkdetect `
+            --hidden-import httpx `
+            --hidden-import httpcore `
+            --hidden-import h11 `
+            --hidden-import certifi `
+            --hidden-import anyio `
+            --hidden-import PIL._tkinter_finder `
+            --collect-all customtkinter `
+            --exclude matplotlib `
+            --exclude numpy `
+            --exclude scipy `
+            --exclude PyQt5 `
+            --exclude PyQt6 `
+            main.py
+
+      - name: Upload exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: SeverDesktop-Windows
+          path: sever_desktop/dist/SeverDesktopV1.exe
