@@ -121,7 +121,7 @@ class PipelineOrchestrator:
                     if os.path.exists(dst_p):
                         os.remove(dst_p)
                     shutil.move(src_p, dst_p)
-                    update_job(self.job_id, output_dir=out_base)
+                    update_job(self.job_id, video_path=dst_p, output_dir=out_base)
                 except Exception as e:
                     logger.warning("failed to move final mp4 to base output dir: %s", e)
             try:
@@ -177,23 +177,16 @@ class PipelineOrchestrator:
         from core.ffmpeg import has_audio_stream
         if not await has_audio_stream(video_path):
             logger.warning("Downloaded video has NO audio stream: %s", video_path)
-            # Try re-download without speed to see if speed filter dropped audio
-            from pipeline.step01_download import find_executable
-            ffmpeg_bin = find_executable(settings.get("ffmpeg_path", "ffmpeg")) or "ffmpeg"
-            # Attempt: strip speed, keep original audio
-            raw_path = video_path.replace("_speed", "_raw")
-            if not os.path.exists(raw_path):
-                import asyncio as _aio
-                proc = await _aio.create_subprocess_exec(
-                    ffmpeg_bin, "-y", "-i", video_path,
-                    "-c:v", "copy", "-c:a", "copy", raw_path,
-                    stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
-                    creationflags=0x08000000,
-                )
-                await _aio.wait_for(proc.communicate(), timeout=60)
-                if proc.returncode == 0 and await has_audio_stream(raw_path):
-                    logger.info("Re-extracted audio from speed-processed video")
-                    video_path = raw_path
+            # Find original video in download folder before speed adjustment
+            candidates = [
+                os.path.join(output_dir, f) for f in os.listdir(output_dir)
+                if f.endswith(".mp4") and "_speed" not in f and os.path.exists(os.path.join(output_dir, f))
+            ]
+            for cand in candidates:
+                if await has_audio_stream(cand):
+                    logger.info("Found original video with audio stream: %s", cand)
+                    video_path = cand
+                    break
 
         # Nếu title vẫn là placeholder mà downloader lấy được dl_title thì dịch và cập nhật
         if _is_placeholder_title(self.title) and dl_title and not _is_placeholder_title(dl_title):
@@ -309,19 +302,26 @@ class PipelineOrchestrator:
         from pipeline.step06_tts import run_tts
         total = sum(len(ch["segments"]) for ch in self._chunks)
         done = 0
+        failed_items: list[tuple[int, int, str]] = []
+        failed_lock = asyncio.Lock()
         # 6 worker song song cho TTS để tăng tốc độ I/O qua mạng
         sem = asyncio.Semaphore(6)
 
-        async def _process_seg(ci, si, text):
+        async def _process_seg(ci: int, si: int, text: str):
             nonlocal done
             if self.cancel_event.is_set():
                 return
             async with sem:
-                tts_path = await run_tts(text, self.voice)
-                self._chunks[ci]["segments"][si]["tts_path"] = tts_path
-                self._tts_files.append(tts_path)
-                done += 1
-                await self._progress(6, "tts", done / max(total, 1))
+                try:
+                    tts_path = await run_tts(text, self.voice, max_retries=2)
+                    self._chunks[ci]["segments"][si]["tts_path"] = tts_path
+                    self._tts_files.append(tts_path)
+                    done += 1
+                    await self._progress(6, "tts", done / max(total, 1))
+                except Exception as exc:
+                    logger.warning("TTS pass 1 failed chunk %d seg %d: %s", ci, si, exc)
+                    async with failed_lock:
+                        failed_items.append((ci, si, text))
 
         tasks = []
         for ci, ch in enumerate(self._chunks):
@@ -334,6 +334,28 @@ class PipelineOrchestrator:
 
         if tasks:
             await asyncio.gather(*tasks)
+
+        # PASS 2: Nếu có segment bị fail sau pass 1, chờ toàn bộ hoàn tất rồi retry lại lần nữa
+        if failed_items and not self.cancel_event.is_set():
+            logger.info("TTS pass 2: retrying %d failed segments...", len(failed_items))
+            await asyncio.sleep(1.5)
+            still_failed: list[tuple[int, int, str, Exception]] = []
+            for ci, si, text in failed_items:
+                if self.cancel_event.is_set():
+                    return
+                try:
+                    tts_path = await run_tts(text, self.voice, max_retries=2)
+                    self._chunks[ci]["segments"][si]["tts_path"] = tts_path
+                    self._tts_files.append(tts_path)
+                    done += 1
+                    await self._progress(6, "tts", done / max(total, 1))
+                except Exception as exc:
+                    logger.error("TTS pass 2 permanent fail chunk %d seg %d: %s", ci, si, exc)
+                    still_failed.append((ci, si, text, exc))
+
+            if still_failed:
+                first_err = still_failed[0][3]
+                raise RuntimeError(f"TTS failed for {len(still_failed)}/{total} segments after retry pass: {first_err}")
 
     # ── Step 7: overlay ───────────────────────────────────
 
@@ -377,5 +399,6 @@ class PipelineOrchestrator:
         result = await final_concat(
             self._rendered_chunks, output_dir, self.job_id,
             self.title, self.target_lang)
-        update_job(self.job_id, output_dir=output_dir)
-        logger.info("concat done: %s", result.get("output_path", ""))
+        final_video_path = result.get("output_path", "")
+        update_job(self.job_id, video_path=final_video_path, output_dir=output_dir)
+        logger.info("concat done: %s", final_video_path)

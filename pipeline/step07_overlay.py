@@ -181,10 +181,10 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
                 # Mute hoàn toàn âm thanh gốc, chỉ lấy TTS track
                 audio_map = f"{tts_input_idx}:a"
             else:
-                # sidechaincompress tự động hạ âm nền gốc xuống khi có tiếng TTS
+                # sidechaincompress tự động hạ âm nền gốc xuống êm ái khi có tiếng TTS
                 fc_parts.append(f"[{tts_input_idx}:a]asplit=2[tts_sc][tts_mix]")
                 fc_parts.append(f"[0:a]volume={orig_vol_val:.2f}[bg_vol]")
-                fc_parts.append("[bg_vol][tts_sc]sidechaincompress=threshold=0.01:ratio=5:attack=50:release=250[bg]")
+                fc_parts.append("[bg_vol][tts_sc]sidechaincompress=threshold=0.03:ratio=3.5:attack=80:release=450[bg]")
                 fc_parts.append("[bg][tts_mix]amix=inputs=2:duration=first:normalize=0[aout]")
                 audio_map = "[aout]"
         else:
@@ -225,9 +225,17 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
     return output
 
 
+MAX_TEMPO = 1.35
+"""Trần nén tốc độ TTS — vượt mức này giọng bắt đầu méo."""
+
+
 def _build_chunk_tts_track(segments: list[dict], duration: float, output_path: str) -> str | None:
-    """Mix all TTS segments of a chunk into a single stereo WAV file.
-    Prevents FFmpeg from hitting input stream limits (error 4294967274) when mixing >100 segments.
+    """Mix all TTS segments of a chunk into a single stereo WAV file with Ripple Pacing Shift.
+    
+    Thuật toán Ripple Pacing Shift:
+    - Tránh triệt để việc 2 câu thoại TTS đè giọng lên nhau khi câu trước đọc dài hơn slot.
+    - Đẩy nhẹ điểm bắt đầu câu sau nếu câu trước chưa dứt (có gap 40ms).
+    - Tự động co giãn tốc độ thông minh theo khoảng trống thực tế đến câu kế tiếp.
     """
     if not segments:
         return None
@@ -236,36 +244,56 @@ def _build_chunk_tts_track(segments: list[dict], duration: float, output_path: s
         from pydub.effects import speedup
         AudioSegment.converter = settings.get("ffmpeg_path", "ffmpeg")
 
-        track_ms = int(max(1.0, duration + 0.5) * 1000)
+        track_ms = int(max(1.0, duration + 1.0) * 1000)
         master = AudioSegment.silent(duration=track_ms, frame_rate=44100).set_channels(2)
         has_audio = False
 
+        # Thu thập các segment hợp lệ kèm index
+        valid_entries = []
         for seg in segments:
             p = seg.get("tts_path")
-            if not (p and os.path.exists(p)):
-                continue
+            if p and os.path.exists(p):
+                s = max(0.0, float(seg.get("start", 0)))
+                valid_entries.append((s, seg, p))
+        valid_entries.sort(key=lambda x: x[0])
+
+        cursor_ms = 0
+
+        for idx, (s, seg, p) in enumerate(valid_entries):
             try:
                 audio = AudioSegment.from_file(p).set_frame_rate(44100).set_channels(2)
-                # Boost volume to 1.5x (~ +3.5 dB)
+                # Boost nhẹ âm lượng TTS (+3.5 dB)
                 audio = audio + 3.5
-                s = max(0.0, float(seg.get("start", 0)))
-                e = min(duration, float(seg.get("end", 0) or s + 2.0))
-                if e <= s:
-                    e = min(duration, s + 2.0)
-                slot = max(0.05, e - s)
-                cur_dur = len(audio) / 1000.0
-                if cur_dur > slot:
-                    tempo = min(MAX_TEMPO, cur_dur / slot)
-                    if tempo > 1.02 and len(audio) > 150:
+
+                # Điểm bắt đầu dự kiến
+                planned_start_ms = int(s * 1000)
+                # Ripple Shift: nếu câu trước đọc chưa xong, đẩy mốc bắt đầu ra sau câu trước 40ms
+                actual_start_ms = max(planned_start_ms, cursor_ms + 40 if cursor_ms > 0 else planned_start_ms)
+
+                # Khoảng trống khả dụng đến câu tiếp theo hoặc hết chunk
+                if idx + 1 < len(valid_entries):
+                    next_start_ms = int(valid_entries[idx + 1][0] * 1000)
+                    available_slot_ms = max(200, next_start_ms - actual_start_ms)
+                else:
+                    available_slot_ms = max(200, int(duration * 1000) - actual_start_ms)
+
+                cur_audio_len_ms = len(audio)
+                if cur_audio_len_ms > available_slot_ms:
+                    slot_sec = available_slot_ms / 1000.0
+                    audio_sec = cur_audio_len_ms / 1000.0
+                    tempo = min(MAX_TEMPO, audio_sec / max(0.05, slot_sec))
+                    if tempo > 1.02 and cur_audio_len_ms > 150:
                         try:
                             audio = speedup(audio, playback_speed=tempo)
                         except Exception:
                             pass
-                pos_ms = max(0, int(s * 1000))
-                master = master.overlay(audio, position=pos_ms)
+
+                # Overlay vào master track
+                master = master.overlay(audio, position=actual_start_ms)
+                cursor_ms = actual_start_ms + len(audio)
                 has_audio = True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("overlay: error placing TTS seg %s: %s", p, exc)
 
         if has_audio:
             master[:int(duration * 1000)].export(output_path, format="wav")
@@ -423,7 +451,7 @@ def _build_ass(segments: list[dict], duration: float,
             continue
         start_ts = _fmt_time(s)
         end_ts = _fmt_time(e)
-        fit_text = _fit_single_line(text, font_size, usable_w)
+        fit_text = _fit_subtitle_text(text, font_size, usable_w)
 
         if is_box_style:
             # Layer 0: Vẽ nền hộp bo tròn mềm
@@ -443,10 +471,55 @@ def _build_ass(segments: list[dict], duration: float,
     return ass_path
 
 
+def _fit_subtitle_text(text: str, font_size: int, usable_w: int) -> str:
+    """Smart Word-Wrap: Tự động tính toán chiều rộng và ngắt dòng cân đối chống tràn màn hình.
+    
+    - Với câu ngắn vừa trong 1 dòng: giữ nguyên 1 dòng gọn gàng.
+    - Với câu dài (> max_chars_per_line): tách thành 2 dòng cân bằng tại ranh giới từ (word boundary).
+    - Dùng ký hiệu \\N của chuẩn ASS để ngắt dòng hiển thị tự nhiên.
+    """
+    clean_text = str(text or "").strip().replace("\r", "").replace("\n", " ")
+    if not clean_text:
+        return ""
+
+    # Ước lượng số ký tự tối đa vừa trên 1 dòng
+    # 1 ký tự trung bình ~ 0.52 * font_size pixel
+    char_w = max(12, int(font_size * 0.52))
+    max_chars = max(16, int(usable_w / char_w))
+
+    if len(clean_text) <= max_chars:
+        return clean_text
+
+    # Tách từ để tìm điểm ngắt dòng tối ưu
+    words = clean_text.split(" ")
+    if len(words) <= 1:
+        # Chuỗi dính liền không khoảng trắng: ngắt đôi ở giữa
+        mid = len(clean_text) // 2
+        return f"{clean_text[:mid]}\\N{clean_text[mid:]}"
+
+    total_len = len(clean_text)
+    best_split_idx = -1
+    best_diff = float("inf")
+    accum = 0
+
+    for i in range(len(words) - 1):
+        accum += len(words[i]) + 1
+        diff = abs((total_len / 2.0) - accum)
+        if diff < best_diff:
+            best_diff = diff
+            best_split_idx = i
+
+    if best_split_idx >= 0:
+        line1 = " ".join(words[:best_split_idx + 1]).strip()
+        line2 = " ".join(words[best_split_idx + 1:]).strip()
+        return f"{line1}\\N{line2}"
+
+    return clean_text
+
+
 def _fit_single_line(text: str, base_fs: int, usable_w: int) -> str:
-    """Cố định cỡ chữ phụ đề (size 32), không tự động tăng giảm font lộn xộn."""
-    text = str(text).strip()
-    return text.replace("\n", " ")
+    """Fallback tương thích ngược."""
+    return _fit_subtitle_text(text, base_fs, usable_w)
 
 
 def _fmt_time(seconds: float) -> str:

@@ -102,6 +102,12 @@ def _get_funasr_model(cfg: dict) -> Any:
     with _FUNASR_LOCK:
         model = _FUNASR_MODELS.get(key)
         if model is None:
+            # Ensure modelscope cache paths are set
+            from core.models import get_models_cache_dir
+            cache_p = str(get_models_cache_dir())
+            os.environ.setdefault("MODELSCOPE_CACHE", cache_p)
+            os.environ.setdefault("HUB_CACHE", cache_p)
+
             _patch_frozen_torch_jit()
             _patch_modelscope_offline()
             from funasr import AutoModel
@@ -666,13 +672,8 @@ async def stt_funasr(audio_path: str, source_lang: str = "zh", **kwargs) -> list
         logger.warning("FunASR init failed (%s), trying fallback STT...", err)
         try:
             return await stt_openai(audio_path, source_lang=source_lang, **kwargs)
-        except Exception:
-            from core.ffmpeg import get_duration
-            dur = await get_duration(audio_path) or 10.0
-            return [{"text": "bilibili_video", "src_text": "bilibili_video",
-                     "start": 0.0, "end": dur, "start_ms": 0, "end_ms": dur * 1000,
-                     "duration": dur, "duration_ms": dur * 1000, "t_start": 0.0, "t_end": dur,
-                     "token_timestamps": []}]
+        except Exception as fb_err:
+            raise RuntimeError(f"STT failed: FunASR initialization error ({err}), fallback OpenAI error ({fb_err})") from err
 
     try:
         import torch

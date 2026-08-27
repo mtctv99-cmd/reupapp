@@ -4,6 +4,31 @@ Mỗi bản build mới sẽ được ghi lại tại đây theo thứ tự mớ
 
 ---
 
+## v0.2.0 — 2026-08-25
+
+**Build:** `SeverDubStudioPro.exe` — `dist/SeverDubStudioPro/`
+**Status:** Released
+
+### Changes
+
+#### Fix: Step 02 Watermark NameError
+- Khắc phục lỗi `NameError: per_frame is not defined` trong `_filter_target_regions` khi video không nhận diện được subtitle band ở lần lặp đầu.
+
+#### Feat & Fix: TTS 2-Tier Retry Logic & Exclusively TikTok Local + Server
+- Cấu hình TTS chạy độc quyền 2 nguồn: TikTok Local (`core.tiktok`) và TikTok Server (`https://tts.maika.sbs`).
+- Mỗi câu thoại retry 2 lần. Khi toàn bộ batch hoàn tất, thực hiện pass retry thứ 2 cho danh sách các câu bị fail để đảm bảo đầy đủ giọng đọc.
+
+#### Fix: Database SQLite Video Path Update
+- Cập nhật đúng `video_path` vào SQLite sau khi xuất file hoàn tất ở Step 08 Concat và dọn dẹp thư mục tạm.
+
+#### Fix: Step 04 STT Error Propagation
+- Ném lỗi `RuntimeError` rõ ràng khi cả FunASR và STT fallback đều hỏng, tránh nuốt lỗi âm thầm và xuất video câm.
+
+#### Fix: Step 01 Download Audio Recovery
+- Quét lại file gốc trong thư mục tải về để phục hồi audio stream nếu video sau speed bị mất tiếng.
+
+---
+
 ## v0.1.0 — 2026-08-13
 
 **Build:** `SeverDubStudioPro.exe` — `dist/SeverDubStudioPro/`

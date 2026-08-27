@@ -18,12 +18,18 @@ from pathlib import Path
 _IS_FROZEN = bool(getattr(sys, "frozen", False))
 
 if _IS_FROZEN:
-    # ── Offline STT models: point modelscope cache to the bundled models ──
+    # ── STT models resolution: 1. bundled models_cache -> 2. %APPDATA%/SeverDesktop/models_cache -> 3. user cache ──
     _bundle_root = Path(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable))))
     _bundled_cache = _bundle_root / "models_cache"
+    _app_data_cache = Path(os.environ.get("APPDATA", str(Path.home()))) / "SeverDesktop" / "models_cache"
+
     if _bundled_cache.is_dir():
         os.environ.setdefault("MODELSCOPE_CACHE", str(_bundled_cache))
         os.environ.setdefault("HUB_CACHE", str(_bundled_cache))
+    elif _app_data_cache.is_dir():
+        os.environ.setdefault("MODELSCOPE_CACHE", str(_app_data_cache))
+        os.environ.setdefault("HUB_CACHE", str(_app_data_cache))
+
     _orig_getsource = inspect.getsource
     _orig_getfile = inspect.getfile
     _orig_getsourcelines = inspect.getsourcelines

@@ -99,3 +99,35 @@ def test_api_queue_sequential():
     delete_job(id1)
     delete_job(id2)
 
+
+def test_api_version():
+    res = client.get("/api/version")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert "version" in data
+
+
+def test_api_check_update():
+    res = client.get("/api/check-update")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert "has_update" in data
+    assert "current_version" in data
+
+
+def test_api_models_status_and_progress():
+    res = client.get("/api/models/status")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert "ready" in data
+
+    p_res = client.get("/api/models/progress")
+    assert p_res.status_code == 200
+    p_data = p_res.json()
+    assert p_data["status"] == "ok"
+    assert "progress" in p_data["data"]
+
+

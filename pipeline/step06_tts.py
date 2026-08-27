@@ -1,25 +1,26 @@
-"""TTS — hỗ trợ Google TTS (gTTS) + TikTok / Remote TTS Server.
+"""TTS — Chỉ hỗ trợ TikTok TTS Local + TikTok TTS từ Server cấu hình.
 
-Áp dụng Cooldown + Exponential Backoff Retry cho TOÀN BỘ các engine.
-Mọi lỗi mạng (timeout, reset, HTTP 429/5xx, JSON hỏng, audio fail) đều được
-retry; server fail sẽ fallback sang gTTS (Google — không bị rate limit như Edge).
+Áp dụng Cooldown + Exponential Backoff Retry (2 lần) cho mỗi request.
 """
 import asyncio
 import base64
 import logging
 import os
 import random
+import re
 import tempfile
 import time
 from typing import Any
+from urllib.parse import urljoin
 
 from core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Global Cooldown Lock cho tất cả request TTS (tối thiểu 0.5s giữa các câu)
+# Global Cooldown Lock cho tất cả request TTS (tối thiểu 0.2s giữa các câu)
 _GLOBAL_TTS_LOCK = asyncio.Lock()
 _LAST_TTS_REQ_TIME = 0.0
+
 
 async def _apply_cooldown(min_gap_sec: float = 0.2):
     global _LAST_TTS_REQ_TIME
@@ -35,8 +36,8 @@ async def _apply_cooldown(min_gap_sec: float = 0.2):
 
 
 def _backoff_sec(retry: int) -> float:
-    """Exponential backoff: 2^retry + jitter (tránh dồn request khi server quá tải)."""
-    return (2 ** retry) + random.uniform(0.5, 1.5)
+    """Exponential backoff: 2^retry + jitter."""
+    return (2 ** retry) + random.uniform(0.3, 1.0)
 
 
 def _save_audio_data(audio_data: Any) -> str:
@@ -67,6 +68,7 @@ def _save_audio_data(audio_data: Any) -> str:
 
     return out.name
 
+
 def _clean_for_tts(text: str) -> str:
     """Làm sạch văn bản trước khi đưa vào TTS: loại bỏ ngoặc kép, ký tự lạ, chuẩn hóa dấu câu."""
     t = str(text or "").strip()
@@ -76,39 +78,56 @@ def _clean_for_tts(text: str) -> str:
     t = t.replace('（', '(').replace('）', ')')
     t = t.replace('，', ', ').replace('。', '. ').replace('！', '! ').replace('？', '? ')
     t = t.replace('：', ': ').replace('；', '; ')
-    import re
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
 
-async def run_tts(text: str, voice: str = "") -> str:
-    """Generate TTS từ voice được chọn. Retry 3 lần + backoff; hỏng dừng luôn, không fallback."""
-    text = _clean_for_tts(text)
+def _normalize_voice(voice: str) -> str:
     v_norm = (voice or "").strip()
+    if v_norm.lower() in ("bv74_steaming", "bv074_streaming", "tiktok_female", "female", ""):
+        return "BV074_streaming"
+    if v_norm.lower() in ("bv001_streaming", "tiktok_male", "male"):
+        return "BV001_streaming"
+    return v_norm
 
-    if v_norm in ("bv74_steaming", "bv074_streaming", "tiktok_female"):
-        v_norm = "BV074_streaming"
-    elif v_norm in ("bv001_streaming", "tiktok_male"):
-        v_norm = "BV001_streaming"
-    elif not v_norm:
-        v_norm = "BV074_streaming"
 
-    # TikTok TTS native khi có session
+async def run_tts(text: str, voice: str = "", max_retries: int = 2) -> str:
+    """Generate TTS từ voice được chọn.
+    Chỉ sử dụng:
+    1. TikTok TTS local (core.tiktok) khi có session.
+    2. TikTok TTS từ Remote Server cấu hình sẵn.
+    Thực hiện retry max_retries (mặc định 2) lần cho mỗi nguồn.
+    """
+    text = _clean_for_tts(text)
+    if not text:
+        raise ValueError("TTS: text is empty")
+
+    v_norm = _normalize_voice(voice)
+    last_error: Exception | None = None
+
+    # 1. Thử TikTok TTS Local native nếu có session
     if v_norm in ("BV074_streaming", "BV001_streaming"):
         from core import tiktok
         if tiktok.has_session():
-            out = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-            out.close()
-            try:
-                return await tiktok.generate(text, v_norm, out.name)
-            except Exception as exc:
-                if os.path.exists(out.name):
-                    try:
-                        os.remove(out.name)
-                    except OSError:
-                        pass
-                raise RuntimeError(f"TikTok TTS failed after retries: {exc}") from exc
+            for attempt in range(max_retries):
+                out = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+                out.close()
+                try:
+                    res = await tiktok.generate(text, v_norm, out.name)
+                    if res and os.path.exists(res) and os.path.getsize(res) > 200:
+                        return res
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning("Local TikTok TTS attempt %d/%d failed: %s", attempt + 1, max_retries, exc)
+                    if os.path.exists(out.name):
+                        try:
+                            os.remove(out.name)
+                        except OSError:
+                            pass
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(_backoff_sec(attempt))
 
+    # 2. Thử Remote TikTok TTS Server
     servers = settings.get_tts_servers()
     if not servers:
         ttsp = settings.get("tts_provider", {})
@@ -116,62 +135,26 @@ async def run_tts(text: str, voice: str = "") -> str:
         api_key = ttsp.get("api_key", "omni-secret-key-123")
         if url:
             servers = [{"url": url, "api_key": api_key, "voice": v_norm}]
-
     if not servers:
         servers = [{"url": "https://tts.maika.sbs", "api_key": "omni-secret-key-123", "voice": v_norm}]
 
-    last_error = None
     for idx, server in enumerate(servers):
         url = server.get("url", "").rstrip("/")
         api_key = server.get("api_key", "")
         if not url:
             continue
         try:
-            return await _tts_from_server(text, v_norm, url, api_key)
+            return await _tts_from_server(text, v_norm, url, api_key, max_retries=max_retries)
         except Exception as exc:
             last_error = exc
-            logger.warning("TTS server %d with voice '%s' failed: %s", idx + 1, v_norm, exc)
+            logger.warning("TTS server %d (%s) failed: %s", idx + 1, url, exc)
 
-    raise RuntimeError(f"TTS failed for voice '{v_norm}' after 3 retries: {last_error}")
+    raise RuntimeError(f"TTS failed for voice '{v_norm}' after retries: {last_error}")
 
-def _save_gtts(text: str, out_path: str) -> None:
-    from gtts import gTTS
-    # ponytail: gTTS crashes on empty/whitespace-only text
-    clean = (text or "").strip()
-    if not clean:
-        raise ValueError("gTTS: empty text")
-    gTTS(text=clean, lang="vi", slow=False).save(out_path)
 
-async def _run_gtts(text: str) -> str:
-    """Google TTS (gTTS) — thay thế Edge TTS (hay bị rate limit)."""
-    clean = (text or "").strip()
-    if not clean:
-        raise RuntimeError("gTTS: empty text, nothing to speak")
-    last_err = None
-    for attempt in range(3):
-        out = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        out.close()
-        try:
-            await asyncio.to_thread(_save_gtts, clean, out.name)
-            if os.path.exists(out.name) and os.path.getsize(out.name) > 500:
-                return out.name
-            last_err = RuntimeError("gTTS produced empty file")
-        except Exception as err:
-            last_err = err
-            logger.warning("gTTS attempt %d/3 failed: %s", attempt + 1, err)
-        if last_err:
-            try:
-                os.remove(out.name)
-            except OSError:
-                pass
-        await asyncio.sleep(1.0)
-
-    raise RuntimeError(f"gTTS failed: {last_err}")
-
-async def _tts_from_server(text: str, voice: str, base_url: str, api_key: str) -> str:
-    """Remote Server TTS với Cooldown + Retry Exponential Backoff (3 lần)."""
+async def _tts_from_server(text: str, voice: str, base_url: str, api_key: str, max_retries: int = 2) -> str:
+    """Remote Server TikTok TTS với Cooldown + Retry (max_retries lần)."""
     import httpx
-    from urllib.parse import urljoin
 
     headers = {"Content-Type": "application/json"}
     if api_key:
@@ -183,9 +166,9 @@ async def _tts_from_server(text: str, voice: str, base_url: str, api_key: str) -
     last_err: Exception | None = None
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        for retry in range(3):
+        for retry in range(max_retries):
             last_err = None
-            await _apply_cooldown(0.5)
+            await _apply_cooldown(0.3)
             try:
                 resp = await client.post(f"{base_url}/api/tts/generate", json=payload, headers=headers)
                 if resp.status_code == 404:
@@ -196,16 +179,16 @@ async def _tts_from_server(text: str, voice: str, base_url: str, api_key: str) -
             except Exception as exc:
                 last_err = exc
                 backoff = _backoff_sec(retry)
-                logger.warning("Remote TTS POST failed attempt %d/3 (%s). Backoff %.2fs...",
-                               retry + 1, exc, backoff)
+                logger.warning("Remote TTS POST failed attempt %d/%d (%s). Backoff %.2fs...",
+                               retry + 1, max_retries, exc, backoff)
                 await asyncio.sleep(backoff)
                 continue
 
             if resp.status_code in (429, 500, 502, 503, 504):
                 last_err = RuntimeError(f"HTTP {resp.status_code}")
                 backoff = _backoff_sec(retry)
-                logger.warning("Remote Server TTS HTTP %d on attempt %d/3. Backoff %.2fs...",
-                               resp.status_code, retry + 1, backoff)
+                logger.warning("Remote Server TTS HTTP %d on attempt %d/%d. Backoff %.2fs...",
+                               resp.status_code, retry + 1, max_retries, backoff)
                 await asyncio.sleep(backoff)
                 continue
 
@@ -215,8 +198,8 @@ async def _tts_from_server(text: str, voice: str, base_url: str, api_key: str) -
             except Exception as exc:
                 last_err = exc
                 backoff = _backoff_sec(retry)
-                logger.warning("Remote TTS bad response on attempt %d/3 (%s). Backoff %.2fs...",
-                               retry + 1, exc, backoff)
+                logger.warning("Remote TTS bad response on attempt %d/%d (%s). Backoff %.2fs...",
+                               retry + 1, max_retries, exc, backoff)
                 await asyncio.sleep(backoff)
                 continue
 
@@ -229,13 +212,13 @@ async def _tts_from_server(text: str, voice: str, base_url: str, api_key: str) -
                     except Exception as exc:
                         last_err = exc
                         backoff = _backoff_sec(retry)
-                        logger.warning("Remote TTS audio save failed attempt %d/3 (%s). Backoff %.2fs...",
-                                       retry + 1, exc, backoff)
+                        logger.warning("Remote TTS audio save failed attempt %d/%d (%s). Backoff %.2fs...",
+                                       retry + 1, max_retries, exc, backoff)
                         await asyncio.sleep(backoff)
                         continue
                 last_err = RuntimeError(f"No job_id in response: {body}")
                 backoff = _backoff_sec(retry)
-                logger.warning("Remote TTS no job_id on attempt %d/3: %s", retry + 1, body)
+                logger.warning("Remote TTS no job_id on attempt %d/%d: %s", retry + 1, max_retries, body)
                 await asyncio.sleep(backoff)
                 continue
 
@@ -267,8 +250,8 @@ async def _tts_from_server(text: str, voice: str, base_url: str, api_key: str) -
             if last_err is None:
                 last_err = RuntimeError(f"TTS job {job_id} did not finish in time")
             backoff = _backoff_sec(retry)
-            logger.warning("Remote TTS poll failed on attempt %d/3 (%s). Backoff %.2fs...",
-                           retry + 1, last_err, backoff)
+            logger.warning("Remote TTS poll failed on attempt %d/%d (%s). Backoff %.2fs...",
+                           retry + 1, max_retries, last_err, backoff)
             await asyncio.sleep(backoff)
 
-    raise RuntimeError(f"TTS server failed after 3 retries: {last_err}")
+    raise RuntimeError(f"TTS server failed after {max_retries} retries: {last_err}")

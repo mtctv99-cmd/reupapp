@@ -10,7 +10,9 @@ _CONFIG_DIR: Path | None = None
 
 
 def get_bin_dir() -> Path | None:
-    """Trả về thư mục bin nhúng (chứa ffmpeg, ffprobe, yt-dlp, BBDown)."""
+    """Trả về thư mục bin (chứa ffmpeg, ffprobe, yt-dlp, BBDown).
+    Ưu tiên _internal/bin hoặc bin/, fallback về %APPDATA%/SeverDesktop/bin.
+    """
     if getattr(sys, "frozen", False):
         base = Path(sys._MEIPASS)
     else:
@@ -19,6 +21,10 @@ def get_bin_dir() -> Path | None:
         p = base / sub
         if p.exists() and p.is_dir():
             return p
+    # Fallback to APPDATA bin directory
+    app_bin = app_dir() / "bin"
+    if app_bin.exists() and app_bin.is_dir():
+        return app_bin
     return None
 
 

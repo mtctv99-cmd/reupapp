@@ -5,34 +5,25 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 rapidocr_dir = os.path.dirname(rapidocr_onnxruntime.__file__)
 
-# ── Bundle STT models (offline-first: máy khác mở lên là dùng được luôn) ──
+# ── Bundle STT models (Bản Lite: Tự tải về %APPDATA%/SeverDesktop/models_cache; Bản Full: bundle kèm) ──
+_BUILD_LITE = os.environ.get("BUILD_LITE", "1") == "1"
 _MODELS_CACHE = os.path.join(os.path.expanduser('~'), '.cache', 'modelscope', 'models')
 _models_datas = []
-if os.path.exists(_MODELS_CACHE):
+
+if not _BUILD_LITE and os.path.exists(_MODELS_CACHE):
     for _d in sorted(os.listdir(_MODELS_CACHE)):
         _p = os.path.join(_MODELS_CACHE, _d)
         if os.path.isdir(_p):
             _models_datas.append((_p, os.path.join('models_cache', 'models', _d)))
 
-# ── Dynamic Playwright Driver + Chromium Browser Detection ──
+# ── Dynamic Playwright Driver (Bỏ Chromium 412MB - Dùng msedge/chrome hệ thống) ──
 _playwright_datas = []
 try:
     import playwright
-    from playwright.sync_api import sync_playwright
     playwright_dir = os.path.dirname(playwright.__file__)
     pw_driver = os.path.join(playwright_dir, 'driver')
     if os.path.exists(pw_driver):
         _playwright_datas.append((pw_driver, 'playwright/driver'))
-
-    # Chỉ lấy đúng 1 bản Chromium active mà Playwright đang dùng
-    with sync_playwright() as p:
-        pw_exec = p.chromium.executable_path
-        if pw_exec and os.path.exists(pw_exec):
-            p_curr = os.path.abspath(pw_exec)
-            while os.path.basename(os.path.dirname(p_curr)) != 'ms-playwright' and os.path.dirname(p_curr) != p_curr:
-                p_curr = os.path.dirname(p_curr)
-            if os.path.exists(p_curr):
-                _playwright_datas.append((p_curr, os.path.join('_ms-playwright', os.path.basename(p_curr))))
 except Exception:
     pass
 
@@ -43,11 +34,13 @@ if os.path.exists(os.path.join(rapidocr_dir, 'config.yaml')):
 if os.path.exists(os.path.join(rapidocr_dir, 'models')):
     _rapidocr_datas.append((os.path.join(rapidocr_dir, 'models'), 'rapidocr_onnxruntime/models'))
 
-# ── Binaries Data ──
+# ── Binaries Data (Tùy chọn: nếu NO_BIN=1 thì app tự tải về %APPDATA%/SeverDesktop/bin) ──
+_NO_BIN = os.environ.get("NO_BIN", "1") == "1"
 _bin_datas = []
-for _b in ('bin/ffmpeg.exe', 'bin/ffprobe.exe', 'bin/yt-dlp.exe', 'bin/BBDown.exe'):
-    if os.path.exists(_b):
-        _bin_datas.append((_b, 'bin'))
+if not _NO_BIN:
+    for _b in ('bin/ffmpeg.exe', 'bin/ffprobe.exe', 'bin/yt-dlp.exe', 'bin/BBDown.exe'):
+        if os.path.exists(_b):
+            _bin_datas.append((_b, 'bin'))
 
 a = Analysis(
     ['run.py'],

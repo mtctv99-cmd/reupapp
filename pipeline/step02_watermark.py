@@ -244,7 +244,7 @@ class WatermarkVisionService:
             if region is not None:
                 regions.append(region)
 
-        return self._filter_target_regions(regions, width, height)[:self._max_regions]
+        return self._filter_target_regions(regions, width, height, per_frame)[:self._max_regions]
 
     @staticmethod
     def _find_band(bands: list[dict[str, Any]], y_center: float, tolerance: int) -> dict[str, Any] | None:
@@ -298,7 +298,8 @@ class WatermarkVisionService:
         return {"x": x0, "y": y0, "w": w, "h": h,
                 "sigma": _DEFAULT_SIGMA, "label": label, "_votes": votes}
 
-    def _filter_target_regions(self, regions: list[dict[str, Any]], width: int, height: int) -> list[dict[str, Any]]:
+    def _filter_target_regions(self, regions: list[dict[str, Any]], width: int, height: int,
+                               per_frame: list[list[dict[str, Any]]] | None = None) -> list[dict[str, Any]]:
         """Keep top-corner logos (left/right) + one lower-centred subtitle band — cổng từ sever_v2."""
         subtitles: list[dict[str, Any]] = []
         logos_by_side: dict[str, dict[str, Any]] = {}
@@ -341,10 +342,11 @@ class WatermarkVisionService:
         if not subtitles:
             # Thu thập mọi box ở nửa dưới màn hình (y >= height * 0.65)
             bottom_boxes = []
-            for fi, detections in enumerate(per_frame):
-                for box in detections:
-                    if (box.get("y", 0) + box.get("h", 0) / 2.0) >= height * 0.65 and box.get("w", 0) >= width * 0.10:
-                        bottom_boxes.append(box)
+            if per_frame:
+                for fi, detections in enumerate(per_frame):
+                    for box in detections:
+                        if (box.get("y", 0) + box.get("h", 0) / 2.0) >= height * 0.65 and box.get("w", 0) >= width * 0.10:
+                            bottom_boxes.append(box)
             if bottom_boxes:
                 # Lấy box dài nhất / lớn nhất
                 longest_box = max(bottom_boxes, key=lambda b: b.get("w", 0))

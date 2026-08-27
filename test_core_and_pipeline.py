@@ -49,3 +49,41 @@ def test_step07_merge_spans():
     # 1.0 to 1.2 is gap of 0.2 <= 0.5 -> should merge
     merged = _merge_spans(spans, max_gap=0.5)
     assert merged == [(0.0, 2.0), (5.0, 6.0)]
+
+
+def test_step02_filter_target_regions_fallback():
+    from pipeline.step02_watermark import WatermarkVisionService
+    service = WatermarkVisionService()
+    # Empty regions with empty per_frame -> should generate default subtitle band without NameError
+    res = service._filter_target_regions([], 1920, 1080, per_frame=[])
+    assert len(res) >= 1
+    assert res[0]["label"] == "subtitle"
+
+
+def test_step06_tts_clean_and_normalize():
+    from pipeline.step06_tts import _clean_for_tts, _normalize_voice
+    raw_text = '“Xin chào” "thế giới"！'
+    cleaned = _clean_for_tts(raw_text)
+    assert '"' not in cleaned and '“' not in cleaned and '”' not in cleaned
+    assert _normalize_voice("tiktok_female") == "BV074_streaming"
+    assert _normalize_voice("tiktok_male") == "BV001_streaming"
+
+
+def test_step07_smart_word_wrap():
+    from pipeline.step07_overlay import _fit_subtitle_text
+    # Short sentence -> stays 1 line
+    short_text = "Xin chào các bạn"
+    res_short = _fit_subtitle_text(short_text, font_size=38, usable_w=1200)
+    assert "\\N" not in res_short
+    assert res_short == short_text
+
+    # Long sentence in narrow container -> wraps into 2 balanced lines with \N
+    long_text = "Hôm nay chúng ta sẽ cùng nhau tìm hiểu về toàn bộ bí mật của tông môn này"
+    res_long = _fit_subtitle_text(long_text, font_size=38, usable_w=400)
+    assert "\\N" in res_long
+    lines = res_long.split("\\N")
+    assert len(lines) == 2
+    # Verify no lost words
+    assert " ".join(lines) == long_text
+
+

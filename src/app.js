@@ -1016,5 +1016,102 @@ document.addEventListener("DOMContentLoaded", () => {
     activeJobId = ""; clearOutput(); loadJobs();
   });
 
+  // ── AI Model Download Handler ───────────────────────────────────
+  async function checkModelStatus() {
+    try {
+      const res = await apiFetch("/models/status");
+      if (res && res.status === "ok" && res.ready === false) {
+        const modal = document.getElementById("modal-model-download");
+        if (modal) modal.classList.remove("hidden");
+      }
+    } catch (e) {
+      console.debug("Model status check error:", e);
+    }
+  }
+
+  let modelPollTimer = null;
+  const btnStartModelDl = document.getElementById("btn-start-model-download");
+  btnStartModelDl?.addEventListener("click", async () => {
+    btnStartModelDl.disabled = true;
+    btnStartModelDl.textContent = "⏳ Đang tải dữ liệu...";
+    await apiFetch("/models/download", { method: "POST" });
+    
+    if (modelPollTimer) clearInterval(modelPollTimer);
+    modelPollTimer = setInterval(async () => {
+      const pRes = await apiFetch("/models/progress");
+      if (pRes && pRes.status === "ok" && pRes.data) {
+        const d = pRes.data;
+        const bar = document.getElementById("model-dl-bar");
+        const pctText = document.getElementById("model-dl-percent");
+        const nameText = document.getElementById("model-dl-name");
+        const countText = document.getElementById("model-dl-count");
+        const sizeText = document.getElementById("model-dl-size");
+
+        const pct = Math.round((d.progress || 0) * 100);
+        if (bar) bar.style.width = pct + "%";
+        if (pctText) pctText.textContent = pct + "%";
+        if (nameText) nameText.textContent = d.current_model || "Đang tải...";
+        if (countText) countText.textContent = `Model ${d.current_index || 0}/${d.total_models || 3}`;
+        if (sizeText) sizeText.textContent = `${d.downloaded_mb || 0} MB / ${d.total_mb || 2055} MB`;
+
+        if (d.progress >= 1.0 && !d.is_downloading) {
+          clearInterval(modelPollTimer);
+          showToast("✅ Đã tải và cài đặt xong toàn bộ dữ liệu AI!");
+          setTimeout(() => {
+            const modal = document.getElementById("modal-model-download");
+            if (modal) modal.classList.add("hidden");
+          }, 1200);
+        } else if (d.error) {
+          clearInterval(modelPollTimer);
+          btnStartModelDl.disabled = false;
+          btnStartModelDl.textContent = "❌ Tải thất bại. Thử lại";
+          showErrorModal("Lỗi tải Model AI: " + d.error);
+        }
+      }
+    }, 1500);
+  });
+
+  // ── Auto Update Checker ─────────────────────────────────────────
+  async function checkForUpdates(manual = false) {
+    if (manual) showToast("Đang kiểm tra bản cập nhật...");
+    try {
+      const res = await apiFetch("/check-update");
+      if (res && res.status === "ok") {
+        if (res.has_update) {
+          const modal = document.getElementById("modal-update");
+          const vEl = document.getElementById("update-modal-version");
+          const curEl = document.getElementById("update-current-version");
+          const clEl = document.getElementById("update-modal-changelog");
+          const dlBtn = document.getElementById("btn-update-download");
+
+          if (vEl) vEl.textContent = `Phiên bản v${res.latest_version}`;
+          if (curEl) curEl.textContent = `v${res.current_version}`;
+          if (clEl) clEl.textContent = res.changelog || "Bản cập nhật mới với nhiều cải tiến và sửa lỗi.";
+          if (dlBtn && res.download_url) dlBtn.href = res.download_url;
+
+          if (modal) modal.classList.remove("hidden");
+        } else if (manual) {
+          showToast(`Bạn đang sử dụng phiên bản mới nhất (v${res.current_version})`);
+        }
+      }
+    } catch (e) {
+      console.debug("Check update failed:", e);
+      if (manual) showToast("Không thể kết nối máy chủ cập nhật", "error");
+    }
+  }
+
+  document.getElementById("btn-check-update-manual")?.addEventListener("click", () => checkForUpdates(true));
+
+  document.getElementById("btn-close-update-modal")?.addEventListener("click", () => {
+    document.getElementById("modal-update")?.classList.add("hidden");
+  });
+  document.getElementById("btn-update-ignore")?.addEventListener("click", () => {
+    document.getElementById("modal-update")?.classList.add("hidden");
+  });
+
+  // Khởi động kiểm tra Model AI & Update khi mở app
+  setTimeout(checkModelStatus, 1500);
+  setTimeout(checkForUpdates, 3000);
+
   setInterval(loadJobs, 5000);
 });

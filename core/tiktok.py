@@ -117,7 +117,7 @@ def _profile_dir(slot: str) -> Path:
 
 
 def login_blocking(slot: str = "", timeout_sec: int = 300) -> str | None:
-    """Mở Chrome, chờ user đăng nhập, quét cookie sessionid rồi lưu.
+    """Mở Trình duyệt (Edge/Chrome), chờ user đăng nhập, quét cookie sessionid rồi lưu.
 
     Mỗi `slot` là một profile riêng → đăng nhập được nhiều tài khoản.
     Chạy đồng bộ (blocking) — gọi trong thread riêng.
@@ -129,11 +129,23 @@ def login_blocking(slot: str = "", timeout_sec: int = 300) -> str | None:
 
     user_data_dir = str(_profile_dir(slot or f"acc{len(list_accounts()) + 1}"))
     with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(
-            user_data_dir=user_data_dir,
-            headless=False,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
+        # Thử mở qua Microsoft Edge có sẵn trên Windows, fallback về Chrome / default
+        ctx = None
+        for channel in ("msedge", "chrome", None):
+            try:
+                launch_kwargs = {
+                    "user_data_dir": user_data_dir,
+                    "headless": False,
+                    "args": ["--disable-blink-features=AutomationControlled"],
+                }
+                if channel:
+                    launch_kwargs["channel"] = channel
+                ctx = p.chromium.launch_persistent_context(**launch_kwargs)
+                break
+            except Exception as e:
+                logger.debug("Playwright launch with channel=%s failed: %s", channel, e)
+        if ctx is None:
+            raise RuntimeError("Không thể mở trình duyệt Edge hoặc Chrome để đăng nhập.")
         try:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.goto("https://www.tiktok.com/login")

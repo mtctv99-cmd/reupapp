@@ -15,6 +15,7 @@
         <span class="titlebar-title">SEVER DUB STUDIO PRO</span>
       </div>
       <div class="titlebar-controls">
+        <button id="btn-check-update-manual" class="titlebar-btn-concat" style="background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.4); color: #93c5fd;" title="Kiểm tra bản cập nhật mới">✨ Cập nhật</button>
         <button id="btn-open-settings" class="titlebar-btn-refresh" title="Đăng nhập Bilibili">⚙️</button>
         <button id="btn-open-concat" class="titlebar-btn-concat">🎬 Ghép Video</button>
         <button id="btn-refresh" class="titlebar-btn-refresh">🔄</button>
@@ -288,6 +289,55 @@
         <div id="concat-files-list" class="concat-files-list"></div>
         <div id="concat-status-msg" class="concat-status-msg text-sub">Cần chọn ít nhất 2 video</div>
         <button id="btn-start-concat" class="btn-hero-launch" disabled>🚀 BẮT ĐẦU GHÉP</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Model Download Modal (First Run AI Setup) -->
+  <div id="modal-model-download" class="modal-overlay hidden">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header flex-between">
+        <div class="flex-align-gap"><span class="modal-icon">🤖</span><h3 class="modal-title-blue">Cài Đặt Dữ Liệu AI Lần Đầu</h3></div>
+      </div>
+      <div class="modal-body">
+        <p class="text-sub" style="margin-bottom: 12px;">App cần tải Model AI nhận dạng giọng nói & dấu câu (FunASR/Paraformer ~2GB) về máy bạn một lần duy nhất. Sau này cập nhật app sẽ không cần tải lại.</p>
+        <div style="background: rgba(0,0,0,0.2); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+          <div class="flex-between" style="font-size: 13px; margin-bottom: 6px;">
+            <span id="model-dl-name" style="font-weight: 500;">Đang chuẩn bị...</span>
+            <span id="model-dl-percent" style="font-weight: 600; color: var(--accent-color, #3b82f6);">0%</span>
+          </div>
+          <div style="background: #2a2b36; height: 8px; border-radius: 4px; overflow: hidden;">
+            <div id="model-dl-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #3b82f6, #60a5fa); transition: width 0.3s;"></div>
+          </div>
+          <div class="flex-between" style="font-size: 11px; color: #888; margin-top: 6px;">
+            <span id="model-dl-count">Model 0/3</span>
+            <span id="model-dl-size">0 MB / 2055 MB</span>
+          </div>
+        </div>
+        <button id="btn-start-model-download" class="btn-hero-launch" style="margin-top: 4px;">🚀 BẮT ĐẦU TẢI DỮ LIỆU AI</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Update Notification Modal -->
+  <div id="modal-update" class="modal-overlay hidden">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header flex-between">
+        <div class="flex-align-gap"><span class="modal-icon">✨</span><h3 class="modal-title-blue">Có Bản Cập Nhật Mới!</h3></div>
+        <button id="btn-close-update-modal" class="btn-icon-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+          <div class="flex-between" style="margin-bottom: 4px;">
+            <span style="font-weight: 600; font-size: 14px;" id="update-modal-version">Phiên bản mới</span>
+            <span style="font-size: 12px; color: #888;">Hiện tại: <span id="update-current-version">v0.2.0</span></span>
+          </div>
+          <div id="update-modal-changelog" style="font-size: 12px; color: #ccc; max-height: 120px; overflow-y: auto; white-space: pre-wrap; margin-top: 6px;"></div>
+        </div>
+        <div class="flex-between" style="gap: 8px;">
+          <button id="btn-update-ignore" class="btn-secondary btn-sm" style="flex: 1;">Để sau</button>
+          <a id="btn-update-download" href="#" target="_blank" class="btn-primary btn-sm" style="flex: 2; text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center;">⬇️ TẢI BẢN MỚI NGAY</a>
+        </div>
       </div>
     </div>
   </div>

@@ -226,6 +226,114 @@ def _run_pipeline(url: str, source_lang: str, target_lang: str, voice: str, remo
 
 # ── GET ─────────────────────────────────────────────────────────
 
+@app.get("/api/version")
+async def api_version():
+    from core import __version__
+    return {"status": "ok", "version": __version__}
+
+
+@app.get("/api/check-update")
+async def api_check_update():
+    """Kiểm tra bản cập nhật mới từ GitHub Releases."""
+    from core import __version__
+    import httpx
+    
+    release_repo = settings.get("release_repo", "mtctv99-cmd/reupapp")
+    url = f"https://api.github.com/repos/{release_repo}/releases/latest"
+    custom_manifest_url = settings.get("update_manifest_url", "")
+    target_url = custom_manifest_url if custom_manifest_url else url
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(target_url, headers={"User-Agent": "SeverStudioApp"})
+            if resp.status_code == 200:
+                data = resp.json()
+                latest_tag = str(data.get("tag_name", "")).lstrip("v").strip()
+                html_url = data.get("html_url", "")
+                download_url = html_url
+                for asset in data.get("assets", []):
+                    aname = asset.get("name", "").lower()
+                    if aname.endswith(".zip") or aname.endswith(".exe") or aname.endswith(".rar"):
+                        download_url = asset.get("browser_download_url", download_url)
+                        break
+
+                def _is_newer(latest: str, current: str) -> bool:
+                    try:
+                        from packaging import version
+                        return version.parse(latest) > version.parse(current)
+                    except Exception:
+                        return bool(latest and latest != current)
+
+                has_update = _is_newer(latest_tag, __version__)
+                return {
+                    "status": "ok",
+                    "has_update": has_update,
+                    "current_version": __version__,
+                    "latest_version": latest_tag,
+                    "download_url": download_url,
+                    "title": data.get("name", f"Phiên bản {latest_tag}"),
+                    "changelog": data.get("body", ""),
+                }
+    except Exception as exc:
+        logger.debug("Check update error: %s", exc)
+
+    return {
+        "status": "ok",
+        "has_update": False,
+        "current_version": __version__,
+        "latest_version": __version__,
+        "download_url": "",
+        "changelog": "",
+    }
+
+
+@app.get("/api/models/status")
+async def api_models_status():
+    """Kiểm tra trạng thái Model AI và Binaries trên máy."""
+    from core.models import check_models_installed, check_binaries_installed, DOWNLOAD_STATE
+    installed = check_models_installed()
+    bins = check_binaries_installed()
+    return {
+        "status": "ok",
+        "ready": installed["ready"] and bins["ready"],
+        "models_ready": installed["ready"],
+        "binaries_ready": bins["ready"],
+        "location": installed.get("location", ""),
+        "missing": installed.get("missing", []),
+        "missing_binaries": bins.get("missing", []),
+        "downloading": DOWNLOAD_STATE["is_downloading"],
+        "progress": DOWNLOAD_STATE["progress"],
+    }
+
+
+@app.post("/api/models/download")
+async def api_models_download():
+    """Kích hoạt tải Model AI & Binaries nền về %APPDATA%/SeverDesktop/."""
+    from core.models import download_all_models_sync, download_missing_binaries, check_binaries_installed, DOWNLOAD_STATE
+    if DOWNLOAD_STATE["is_downloading"]:
+        return {"status": "ok", "message": "Đang tải", "downloading": True}
+
+    def _bg_download():
+        try:
+            # 1. Tải Binaries trước nếu thiếu (nhanh, ~100-200MB)
+            if not check_binaries_installed()["ready"]:
+                download_missing_binaries()
+            # 2. Tải STT Models
+            download_all_models_sync()
+        except Exception as exc:
+            logger.error("Background AI model/binaries download failed: %s", exc)
+
+    threading.Thread(target=_bg_download, daemon=True, name="model-downloader").start()
+    return {"status": "ok", "message": "Bắt đầu tải", "downloading": True}
+
+
+@app.get("/api/models/progress")
+async def api_models_progress():
+    """Truy vấn tiến trình tải Model AI."""
+    from core.models import DOWNLOAD_STATE
+    return {"status": "ok", "data": dict(DOWNLOAD_STATE)}
+
+
 @app.get("/api/jobs")
 async def api_jobs():
     return {"status": "ok", "data": list_jobs(50)}
