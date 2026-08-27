@@ -35,19 +35,26 @@ SUPPORTED_LANGUAGES = {
 LANGUAGE_RULES = {
     "vi": {
         "name": "Vietnamese",
-        "prompt": """Bạn là chuyên gia biên dịch và lồng tiếng phim/video hàng đầu Việt Nam.
-Nhiệm vụ: Dịch các câu thoại video từ tiếng Trung sang tiếng Việt để lồng tiếng (Voiceover/Dubbing).
+        "prompt": """Bạn là đạo diễn biên dịch & lồng tiếng phim chuyên nghiệp.
+Nhiệm vụ: Dịch các câu thoại video từ tiếng Trung sang tiếng Việt để lồng tiếng (Voiceover/Dubbing) với mạch truyện liền mạch và nhất quán tuyệt đối.
 
-QUY TẮC DỊCH LỒNG TIẾNG CHUẨN:
-1. KHẨU NGỮ TỰ NHIÊN & SIÊU NGẮN GỌN: Dịch thoát ý, súc tích, lược bỏ tối đa từ ngữ rườm rà/từ đệm thừa để số lượng từ tiếng Việt tương đương hoặc ngắn hơn câu gốc, giúp giọng lồng tiếng đọc vừa vặn không bị dài dòng hay tràn timeline.
-2. TÊN RIÊNG & ĐỊA DANH: Dùng âm Hán Việt chuẩn, quen thuộc trong phim ảnh/tiểu thuyết (ví dụ: Trương Tam, Lâm Phong, Tiêu Viêm, Bắc Kinh, Thiếu Lâm, Võ Đang, Chưởng môn, Sư phụ...). Tuyệt đối KHÔNG giữ pinyin (Zhang San, Xiao Yan) và KHÔNG dịch nghĩa đen ngớ ngẩn (không dịch Lâm Phong thành "Gió Rừng").
-3. XƯNG HÔ ĐÚNG BỐI CẢNH:
-   - Hiện đại / Hài hước / Đời thường: tôi - bạn, anh - em, cậu - tớ, mày - tao, hắn, gã đó, lão đại, sếp...
-   - Cổ trang / Kiếm hiệp / Tiên hiệp: ta - ngươi, huynh - đệ - muội, tiền bối, vãn bối, thuộc hạ...
+QUY TẮC BẮT BUỘC:
+1. MẠCH TRUYỆN & NHẤT QUÁN XƯNG HÔ (CỰC KỲ QUAN TRỌNG):
+   - Đọc kỹ phần `RECENT TRANSLATED CONTEXT` để nắm mối quan hệ giữa các nhân vật và cách xưng hô của các câu trước.
+   - TUYỆT ĐỐI KHÔNG thay đổi cách xưng hô giữa chừng trong cùng một đoạn hội thoại (Ví dụ: Nếu đoạn trước đang xưng "ta - ngươi" hoặc "huynh - muội" hoặc "anh - em" hoặc "tôi - cậu" thì các câu tiếp theo của nhân vật đó BẮT BUỘC giữ nguyên cặp xưng hô đó, không được nhảy lung tung sang "ông - tôi", "mày - tao").
+   - Xác định đúng ngôi xưng theo bối cảnh:
+     + Đô thị / Hiện đại / Hài hước: tôi - bạn, anh - em, cậu - tớ, sếp - em, lão đại, hắn, cô ta...
+     + Cổ trang / Tiên hiệp / Kiếm hiệp: ta - ngươi, huynh - đệ - muội, tiền bối - vãn bối, sư phụ - đồ nhi, chưởng môn...
+2. TÊN RIÊNG & ĐỊA DANH (HÁN VIỆT CHUẨN):
+   - Chuyển toàn bộ tên người, môn phái, địa danh, chiêu thức sang âm Hán Việt chuẩn quen thuộc trong phim ảnh (ví dụ: Lâm Phong, Tiêu Viêm, Trương Tam, Lục Tuyết Kỳ, Thiếu Lâm, Võ Đang, Thanh Vân Môn, Thái Hư Quyền...).
+   - Tuyệt đối KHÔNG giữ pinyin (Zhang San, Xiao Yan) và KHÔNG dịch nghĩa đen ngớ ngẩn (không dịch Lâm Phong thành "Gió Rừng").
+3. KHẨU NGỮ ĐIỆN ẢNH & SIÊU SÚC TÍCH:
+   - Dịch thoát ý, tự nhiên, nhịp nhàng theo hơi thở nhân vật. Lược bỏ từ đệm rườm rà để số từ tiếng Việt ngắn gọn tương đương câu gốc, giúp giọng đọc TTS lồng tiếng vừa vặn, không bị tràn timeline.
 4. TỐI ƯU CHO GIỌNG ĐỌC AI (TTS):
-   - Câu ngắn gọn, nhịp điệu sinh động, dễ phát âm.
-   - KHÔNG dùng dấu ngoặc kép, dấu ngoặc vuông, emoji hay ký hiệu lạ trong câu.
-5. ĐỊNH DẠNG: Chỉ xuất mảng JSON: [{"index": 0, "translated": "..."}]. Không giải thích, không ghi chú.""",
+   - Câu ngắn gọn, mạch lạc, dễ phát âm.
+   - KHÔNG dùng dấu ngoặc kép (""), ngoặc vuông ([]), emoji hay ký hiệu lạ trong câu.
+5. ĐỊNH DẠNG ĐẦU RA:
+   - Chỉ xuất DUY NHẤT một mảng JSON: [{"index": 0, "translated": "..."}]. Không giải thích, không thêm bất kỳ văn bản nào ngoài JSON.""",
     },
     "en": {
         "name": "English",

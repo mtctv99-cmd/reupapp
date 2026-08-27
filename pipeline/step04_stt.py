@@ -155,35 +155,35 @@ def _set_segment_start(seg: dict, new_start: float) -> None:
     seg["duration_ms"] = round(max(0.0, (seg.get("end", 0) - new_start) * 1000.0), 1)
 
 
-# ── STT Parameters (tuned cho Chinese → Vietnamese dub) ─────
+# ── STT Parameters (tuned cho TTS Pacing: Chinese → Vietnamese dub) ─────
 
-_MAX_SEGMENT_CHARS = 16
-_TARGET_SEGMENT_SECONDS = 3.0
+_MAX_SEGMENT_CHARS = 24       # Số ký tự tối đa trước khi cân nhắc tách câu
+_TARGET_SEGMENT_SECONDS = 3.5  # Thời lượng chuẩn của 1 câu thoại mượt (2.5s - 4.5s)
 
-# Refine — cắt câu dài bằng dấu câu (ngắt nhịp tự nhiên cho thoại lồng tiếng)
-_REFINE_THRESHOLD = 3.2
-_REFINE_SPLIT_MAX = 3.0
+# Refine — Chỉ cắt dấu phẩy nhẹ khi câu dài > 3.8s hoặc > 18 chữ
+_REFINE_THRESHOLD = 3.8
+_REFINE_SPLIT_MAX = 3.5
 
-# Split long — trần tối đa mỗi câu thoại TTS (tránh câu dài lê thê)
-_SPLIT_LONG_THRESHOLD = 3.2
+# Split long — trần tối đa cho câu thoại TTS dài (tránh câu đọc lê thê)
+_SPLIT_LONG_THRESHOLD = 4.5
 
 # Token / Silence splitting
-_MIN_SILENCE_TOKEN_GAP_MS = 280.0
+_MIN_SILENCE_TOKEN_GAP_MS = 380.0  # Chỉ cắt theo khoảng lặng token khi nghỉ thật sự >= 380ms
 
-# Merge fragmented — chỉ ghép khi cực ngắn để không dính chùm câu
-_MERGE_MAX_GAP_MS = 180
-_MERGE_TARGET_SECONDS = 2.8
-_MERGE_MAX_CHARS = 14
-_MERGE_SHORT_DURATION = 0.6
-_MERGE_SHORT_CHARS = 3
+# Merge fragmented — tự động gộp các câu thoại vụn (< 1.5s hoặc < 6 ký tự)
+_MERGE_MAX_GAP_MS = 300
+_MERGE_TARGET_SECONDS = 3.8
+_MERGE_MAX_CHARS = 22
+_MERGE_SHORT_DURATION = 1.5
+_MERGE_SHORT_CHARS = 6
 
 # Audio cleanup (pydub)
 _SILENCE_THRESH_OFFSET_DB = 16
-_MIN_SILENCE_MS = 280
-_SHORT_FILLER_MAX_DURATION = 0.8
-_SHORT_TEXT_LONG_SEGMENT_CHARS = 5
-_SHORT_TEXT_LONG_SEGMENT_SECONDS = 3.0
-_SHORT_TEXT_ISLAND_MIN_GAP_MS = 280
+_MIN_SILENCE_MS = 320
+_SHORT_FILLER_MAX_DURATION = 0.6
+_SHORT_TEXT_LONG_SEGMENT_CHARS = 4
+_SHORT_TEXT_LONG_SEGMENT_SECONDS = 3.5
+_SHORT_TEXT_ISLAND_MIN_GAP_MS = 320
 _MAX_GAP_FILL_SECONDS = 0.35
 
 
@@ -266,8 +266,11 @@ def split_by_silence_tokens(segments: list[dict], min_silence_ms: float = _MIN_S
 
 
 def refine_segments(segments: list[dict]) -> list[dict]:
-    """Cắt câu thoại theo toàn bộ dấu ngắt câu (chấm, phẩy, chấm hỏi, chấm than, chấm phẩy)
-    để chia nhỏ thành các câu thoại ngắn, tự nhiên, vừa nhịp thở khi TTS lồng tiếng."""
+    """Phân đoạn thông minh cho TTS:
+    1. Ưu tiên cắt tại dấu ngắt câu MẠNH (chấm, chấm hỏi, chấm than, chấm phẩy, xuống dòng: . ! ? 。 ！ ？ ； ; \n)
+    2. Chỉ cắt tại dấu ngắt câu NHẸ (phẩy, hai chấm: ， , 、 : ：) KHI câu dài > 3.8s hoặc > 18 chữ.
+    Giúp câu thoại giữ nguyên vẹn mệnh đề và ngữ cảnh, TTS đọc liền mạch, truyền cảm, không bị ngắt vụn.
+    """
     refined = []
     for seg in segments:
         text = str(seg.get("text", "") or seg.get("src_text", "")).strip()
@@ -276,12 +279,32 @@ def refine_segments(segments: list[dict]) -> list[dict]:
             refined.append(seg)
             continue
 
-        # Tìm mọi điểm ngắt câu và sắp xếp theo đúng thứ tự xuất hiện trong chuỗi
-        punc_pts = [m.end() for m in re.finditer(r'[.!?。！？；;，,、:：]+', text)]
-        punc_pts = sorted(set(p for p in punc_pts if 0 < p < len(text)))
+        # 1. Thử cắt theo dấu ngắt câu mạnh trước
+        strong_pts = [m.end() for m in re.finditer(r'[.!?。！？；;\n]+', text)]
+        strong_pts = sorted(set(p for p in strong_pts if 0 < p < len(text)))
 
-        if punc_pts:
-            refined.extend(_split_by_points(seg, punc_pts, _REFINE_SPLIT_MAX))
+        if strong_pts:
+            subs = _split_by_points(seg, strong_pts, _REFINE_SPLIT_MAX)
+            # Kiểm tra xem các câu con có câu nào vẫn quá dài cần cắt thêm dấu phẩy không
+            for s in subs:
+                s_dur = float(s.get("duration", 0.0))
+                s_txt = str(s.get("text", "")).strip()
+                if s_dur > _REFINE_THRESHOLD or len(s_txt) > _MAX_SEGMENT_CHARS:
+                    weak_pts = [m.end() for m in re.finditer(r'[，,、:：]+', s_txt)]
+                    weak_pts = sorted(set(p for p in weak_pts if 0 < p < len(s_txt)))
+                    if weak_pts:
+                        refined.extend(_split_by_points(s, weak_pts, _REFINE_SPLIT_MAX))
+                    else:
+                        refined.append(s)
+                else:
+                    refined.append(s)
+            continue
+
+        # 2. Nếu không có dấu ngắt câu mạnh -> Cắt theo dấu ngắt câu nhẹ
+        weak_pts = [m.end() for m in re.finditer(r'[，,、:：]+', text)]
+        weak_pts = sorted(set(p for p in weak_pts if 0 < p < len(text)))
+        if weak_pts:
+            refined.extend(_split_by_points(seg, weak_pts, _REFINE_SPLIT_MAX))
         else:
             refined.append(seg)
     return refined
