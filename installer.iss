@@ -5,6 +5,10 @@
 #define MyAppURL "https://github.com/mtctv99-cmd/sever-studio-releases"
 #define MyAppExeName "SeverDubStudioPro.exe"
 
+#ifndef OutputBaseFilename
+  #define OutputBaseFilename "SeverDubStudioPro_Setup_v" + MyAppVersion
+#endif
+
 [Setup]
 AppId={{E8F5A820-A2F7-4E90-B876-88E4B0C729E1}
 AppName={#MyAppName}
@@ -16,7 +20,7 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=dist
-OutputBaseFilename=SeverDubStudioPro_Setup_v{#MyAppVersion}
+OutputBaseFilename={#OutputBaseFilename}
 Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
