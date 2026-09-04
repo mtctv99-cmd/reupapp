@@ -112,30 +112,54 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
     # Phụ đề Tiếng Việt được lồng cùng Subtitle Box đen mờ viền êm (\\blur2) phủ khớp vị trí sub gốc
     if ass_path and os.path.exists(ass_path):
         # ponytail: FFmpeg subtitles filter needs escaped paths on Windows
-        # Use forward slashes + escape colons for FFmpeg filter syntax (single quote & backslash)
+        # Use forward slashes + escape colons and backslashes/quotes for FFmpeg filter syntax
         clean_ass = ass_path.replace("\\", "/")
         clean_ass = clean_ass.replace("'", "'\\''")
         if len(clean_ass) > 2 and clean_ass[1] == ":":
             clean_ass = clean_ass[0] + "\\:" + clean_ass[2:]
         next_v = "[vsub]"
-        v_chains.append(f"{curr_v}subtitles=filename='{clean_ass}'{next_v}")
+        v_chains.append(f"{curr_v}subtitles=filename=\\'{clean_ass}\\':original_size={orig_w}x{orig_h}{next_v}")
         curr_v = next_v
 
-    # D. SCALE/PAD (Chỉ áp dụng khi user chọn tỉ lệ khác; mặc định 'original' giữ nguyên 100% màu sắc & nét gốc)
+    # D. SCALE/PAD / BLUR BACKGROUND / CROP
+    # Áp dụng khi user chọn tỉ lệ khác; mặc định 'original' giữ nguyên 100% video gốc
     aspect_ratio = str(settings.get("aspect_ratio", "original")).lower()
-    if "original" in aspect_ratio or not aspect_ratio:
-        scale_str = ""
-    elif "3:4" in aspect_ratio:
-        scale_str = "scale=720:960:force_original_aspect_ratio=decrease,pad=720:960:(720-iw)/2:(960-ih)/2"
-    elif "9:16" in aspect_ratio:
-        scale_str = "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(720-iw)/2:(1280-ih)/2"
-    else:
-        scale_str = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(1280-iw)/2:(720-ih)/2"
+    bg_style = str(settings.get("bg_style", "blur")).lower()
+    bg_color = str(settings.get("bg_color", "black")).lower()
+    pad_color = "white" if "white" in bg_color else "black"
 
-    if scale_str:
+    target_w, target_h = 0, 0
+    if "original" in aspect_ratio or not aspect_ratio:
+        pass
+    elif "3:4" in aspect_ratio or "3*4" in aspect_ratio:
+        target_w, target_h = 1080, 1440
+    elif "9:16" in aspect_ratio:
+        target_w, target_h = 720, 1280
+    elif "16:9" in aspect_ratio:
+        target_w, target_h = 1280, 720
+
+    if target_w > 0 and target_h > 0:
         zoom_out = "[vzoom]"
-        v_chains.append(f"{curr_v}{scale_str}{zoom_out}")
-        curr_v = zoom_out
+        # Trường hợp đặc biệt: Nếu video nguồn dạng dọc 9:16 (~0.5625) mà đưa vào khung 3:4 (0.75)
+        # -> Video nguồn đã có tỷ lệ dọc cao hơn 3:4, chỉ cần crop nhẹ 2 phần trên/dưới để lấp đầy 100% khung hình
+        is_source_9_16 = (orig_w > 0 and orig_h > 0 and abs((orig_w / orig_h) - (9 / 16)) < 0.08)
+        if ("3:4" in aspect_ratio or "3*4" in aspect_ratio) and is_source_9_16:
+            v_chains.append(f"{curr_v}scale={target_w}:-1,crop={target_w}:{target_h}:0:(ih-{target_h})/2{zoom_out}")
+            curr_v = zoom_out
+        elif bg_style == "blur":
+            # Nền mờ nghệ thuật chuyển động theo video
+            v_chains.append(
+                f"{curr_v}split[vbg_in][vfg_in];"
+                f"[vbg_in]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=25:5[vbg_blur];"
+                f"[vfg_in]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease[vfg_scaled];"
+                f"[vbg_blur][vfg_scaled]overlay=(W-w)/2:(H-h)/2{zoom_out}"
+            )
+            curr_v = zoom_out
+        else:
+            # Màu nền cố định (Đen, Trắng, ...)
+            scale_pad = f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,pad={target_w}:{target_h}:({target_w}-iw)/2:({target_h}-ih)/2:color={pad_color}"
+            v_chains.append(f"{curr_v}{scale_pad}{zoom_out}")
+            curr_v = zoom_out
 
     # E. LOGO — dán sau scale/pad để vị trí tính theo khung cuối, không lệch vì letterbox
     if logo_idx:
@@ -479,6 +503,8 @@ def _fit_subtitle_text(text: str, font_size: int, usable_w: int) -> str:
     - Dùng ký hiệu \\N của chuẩn ASS để ngắt dòng hiển thị tự nhiên.
     """
     clean_text = str(text or "").strip().replace("\r", "").replace("\n", " ")
+    # Escape { và } để tránh xung đột với style tags trong định dạng ASS
+    clean_text = clean_text.replace("{", "(").replace("}", ")")
     if not clean_text:
         return ""
 

@@ -109,6 +109,17 @@ def count_pending_jobs() -> int:
     return row["c"] if row else 0
 
 
+def reset_stale_running_jobs() -> int:
+    """Thu hồi trạng thái các job bị kẹt ở status 'running' khi app crash hoặc tắt đột ngột."""
+    conn = _get_conn()
+    cur = conn.execute(
+        "UPDATE jobs SET status='failed', error='Tiến trình bị gián đoạn do ứng dụng khởi động lại' "
+        "WHERE status='running'"
+    )
+    conn.commit()
+    return cur.rowcount
+
+
 def delete_job(job_id: str) -> None:
     _get_conn().execute("DELETE FROM jobs WHERE id=?", (job_id,))
     _get_conn().commit()

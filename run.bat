@@ -26,7 +26,17 @@ if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
     goto :RUN
 )
 
-echo [!] Khong tim thay Python. Vui long kiem tra lai PATH.
+if exist "venv\Scripts\python.exe" (
+    set "PYTHON=venv\Scripts\python.exe"
+    goto :RUN
+)
+
+if exist ".venv\Scripts\python.exe" (
+    set "PYTHON=.venv\Scripts\python.exe"
+    goto :RUN
+)
+
+echo [!] Khong tim thay Python. Vui long kiem tra lai PATH hoac moi truong venv.
 pause
 exit /b 1
 

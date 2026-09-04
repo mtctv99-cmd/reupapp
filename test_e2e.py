@@ -95,3 +95,30 @@ def test_ui_empty_url_validation():
         expect(err_modal).not_to_be_visible()
 
         browser.close()
+
+def test_ui_aspect_ratio_unlocks_bg_style():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(BASE_URL)
+
+        aspect_select = page.locator("#select-aspect-ratio")
+        bg_select = page.locator("#select-bg-style")
+
+        # 1. Khi ở original -> bg_select bị disabled
+        aspect_select.select_option("original")
+        expect(bg_select).to_be_disabled()
+
+        # 2. Khi chọn Facebook 3:4 -> bg_select được MỞ KHÓA
+        aspect_select.select_option("3:4_1080p")
+        expect(bg_select).to_be_enabled()
+
+        # 3. Khi chọn lại YouTube 16:9 hoặc TikTok 9:16 -> lại bị disabled
+        aspect_select.select_option("16:9_720p")
+        expect(bg_select).to_be_disabled()
+
+        aspect_select.select_option("9:16_720p")
+        expect(bg_select).to_be_disabled()
+
+        browser.close()
+

@@ -90,6 +90,7 @@ function showConfirm(msg, withInput) {
 const statsBadge = document.getElementById("stats-badge");
 const inputUrl = document.getElementById("input-url");
 const selectAspectRatio = document.getElementById("select-aspect-ratio");
+const selectBgStyle = document.getElementById("select-bg-style");
 const speedSlider = document.getElementById("speed-slider");
 const speedValue = document.getElementById("speed-value");
 const volumeSlider = document.getElementById("volume-slider");
@@ -259,7 +260,14 @@ function clearOutput() {
   outputFolderPath = "";
 }
 
-// ── Settings (Bilibili Login) ────────────────────────────────
+function updateBgStyleVisibility() {
+  if (!selectAspectRatio || !selectBgStyle) return;
+  const isFacebook = selectAspectRatio.value.includes("3:4");
+  selectBgStyle.disabled = !isFacebook;
+  selectBgStyle.style.opacity = isFacebook ? "1" : "0.35";
+  selectBgStyle.style.cursor = isFacebook ? "pointer" : "not-allowed";
+}
+window.updateBgStyleVisibility = updateBgStyleVisibility;
 async function loadSettings() {
   const res = await apiFetch("/settings");
   if (res && res.data) currentSettings = res.data;
@@ -271,6 +279,11 @@ async function loadSettings() {
     const exists = Array.from(selectAspectRatio.options).some(o => o.value === currentSettings.aspect_ratio);
     if (exists) selectAspectRatio.value = currentSettings.aspect_ratio;
   }
+  if (currentSettings.bg_style && selectBgStyle) {
+    const exists = Array.from(selectBgStyle.options).some(o => o.value === currentSettings.bg_style);
+    if (exists) selectBgStyle.value = currentSettings.bg_style;
+  }
+  updateBgStyleVisibility();
   if (speedSlider && currentSettings.video_speed !== undefined) {
     speedSlider.value = currentSettings.video_speed;
     speedValue.textContent = parseFloat(currentSettings.video_speed).toFixed(2) + "x";
@@ -520,6 +533,8 @@ async function startPipeline() {
     title: "",
     voice: selectVoice.value.trim(), remove_sub: true,
     aspect_ratio: selectAspectRatio.value,
+    bg_style: selectBgStyle ? selectBgStyle.value : "blur",
+    bg_color: selectBgStyle && selectBgStyle.value === "white" ? "white" : "black",
     sub_style: selectSubStyle ? selectSubStyle.value : "white_black",
     sub_font_size: 38,
     video_speed: parseFloat(speedSlider ? speedSlider.value : 1.0),
@@ -944,10 +959,20 @@ document.addEventListener("DOMContentLoaded", () => {
     await apiFetch("/settings", { method: "POST", body: JSON.stringify({ sub_style: selectSubStyle.value }) });
   });
 
-  // Aspect ratio change
+  // Aspect ratio & Background style change
   selectAspectRatio?.addEventListener("change", async () => {
+    updateBgStyleVisibility();
     currentSettings.aspect_ratio = selectAspectRatio.value;
     await apiFetch("/settings", { method: "POST", body: JSON.stringify({ aspect_ratio: selectAspectRatio.value }) });
+  });
+
+  selectBgStyle?.addEventListener("change", async () => {
+    currentSettings.bg_style = selectBgStyle.value;
+    currentSettings.bg_color = selectBgStyle.value === "white" ? "white" : "black";
+    await apiFetch("/settings", {
+      method: "POST",
+      body: JSON.stringify({ bg_style: currentSettings.bg_style, bg_color: currentSettings.bg_color })
+    });
   });
 
   // Speed slider

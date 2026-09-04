@@ -357,11 +357,10 @@ _RATE_LIMIT_STATUSES = frozenset({429, 402, 403})
 _TIER_COOLDOWNS: dict[str, float] = {}
 
 def _is_tier_cooling(tier_name: str) -> bool:
-    return time.time() < _TIER_COOLDOWNS.get(tier_name, 0)
+    return False
 
 def _start_tier_cooldown(tier_name: str, duration: int = 60) -> None:
-    _TIER_COOLDOWNS[tier_name] = time.time() + duration
-    logger.warning("translate: tier [%s] cooldown %ds", tier_name, duration)
+    pass
 
 async def _translate_openai(
     texts: list[str], url: str, api_key: str, model: str,
@@ -680,7 +679,62 @@ async def run_translate(
         if not val or validator.has_chinese(val) or val.lower() in ("video bilibili", "bilibili_video", "bilibili video", "bilibili"):
             val = seg.get("text", "").strip()
         result.append({**seg, "translated_text": val})
-    return result
+
+    # Tách sub-sentences nếu câu dịch có chứa dấu chấm/dứt câu ở giữa (tránh sub dài 2 dòng)
+    return _split_translated_segments(result)
+
+
+def _split_translated_segments(segments: list[dict]) -> list[dict]:
+    """Phân tách segment sau dịch nếu bản dịch chứa các câu con (. ! ? 。 ！ ？ \\n).
+
+    Phân bổ thời gian start/end theo tỷ lệ độ dài câu con để phụ đề và TTS tách bạch,
+    xuất hiện vừa vặn từng câu ngắn gọn.
+    """
+    final_segments: list[dict] = []
+    for seg in segments:
+        text_vi = str(seg.get("translated_text", "")).strip()
+        dur = max(0.01, float(seg.get("end", 0.0)) - float(seg.get("start", 0.0)))
+
+        # Chỉ tách khi thời lượng đủ dài (>= 2.5s) hoặc câu dịch dài (> 35 ký tự)
+        if dur < 2.5 and len(text_vi) < 35:
+            final_segments.append(seg)
+            continue
+
+        # Tách câu theo dấu ngắt câu mạnh kèm khoảng trắng phía sau (tránh số thập phân như 3.5)
+        raw_parts = re.split(r'(?<=[.!?。！？\n])\s+', text_vi)
+        parts = [p.strip() for p in raw_parts if p.strip()]
+
+        if len(parts) <= 1:
+            final_segments.append(seg)
+            continue
+
+        total_chars = sum(len(p) for p in parts)
+        if total_chars == 0:
+            final_segments.append(seg)
+            continue
+
+        start_t = float(seg.get("start", 0.0))
+        end_t = float(seg.get("end", start_t + dur))
+        cur_t = start_t
+
+        for idx, part in enumerate(parts):
+            part_dur = dur * (len(part) / total_chars)
+            part_end = min(end_t, cur_t + part_dur) if idx < len(parts) - 1 else end_t
+
+            sub_seg = dict(seg)
+            sub_seg["translated_text"] = part
+            sub_seg["start"] = round(cur_t, 3)
+            sub_seg["end"] = round(part_end, 3)
+            sub_seg["duration"] = round(max(0.01, part_end - cur_t), 3)
+            if "t_start" in sub_seg:
+                sub_seg["t_start"] = sub_seg["start"]
+            if "t_end" in sub_seg:
+                sub_seg["t_end"] = sub_seg["end"]
+
+            final_segments.append(sub_seg)
+            cur_t = part_end
+
+    return final_segments
 
 
 async def _retry_split_recursive(texts: list[str], pending_idx: list[int],

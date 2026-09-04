@@ -17,22 +17,9 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Global Cooldown Lock cho tất cả request TTS (tối thiểu 0.2s giữa các câu)
-_GLOBAL_TTS_LOCK = asyncio.Lock()
-_LAST_TTS_REQ_TIME = 0.0
-
-
-async def _apply_cooldown(min_gap_sec: float = 0.2):
-    global _LAST_TTS_REQ_TIME
-    sleep_dur = 0.0
-    async with _GLOBAL_TTS_LOCK:
-        now = time.monotonic()
-        elapsed = now - _LAST_TTS_REQ_TIME
-        if elapsed < min_gap_sec:
-            sleep_dur = min_gap_sec - elapsed
-        _LAST_TTS_REQ_TIME = now + sleep_dur
-    if sleep_dur > 0:
-        await asyncio.sleep(sleep_dur)
+# Global Cooldown Lock đã được gỡ bỏ theo yêu cầu
+async def _apply_cooldown(min_gap_sec: float = 0.0):
+    pass
 
 
 def _backoff_sec(retry: int) -> float:
@@ -41,7 +28,7 @@ def _backoff_sec(retry: int) -> float:
 
 
 def _save_audio_data(audio_data: Any) -> str:
-    """Lưu audio (base64 string hoặc bytes) ra file tạm .mp3, speedup x1.1, trả về path."""
+    """Lưu audio (base64 string hoặc bytes) ra file tạm .mp3, trả về path."""
     if isinstance(audio_data, str):
         try:
             audio_data = base64.b64decode(audio_data)
@@ -53,18 +40,6 @@ def _save_audio_data(audio_data: Any) -> str:
     out.close()
     with open(out.name, "wb") as f:
         f.write(audio_data)
-
-    # Tự động tăng tốc x1.1 sau khi nhận audio TTS về
-    try:
-        from pydub import AudioSegment
-        from pydub.effects import speedup
-        AudioSegment.converter = settings.get("ffmpeg_path", "ffmpeg")
-        seg = AudioSegment.from_file(out.name)
-        if len(seg) > 200:
-            fast_seg = speedup(seg, playback_speed=1.1)
-            fast_seg.export(out.name, format="mp3")
-    except Exception as exc:
-        logger.warning("TTS x1.1 speedup skipped: %s", exc)
 
     return out.name
 

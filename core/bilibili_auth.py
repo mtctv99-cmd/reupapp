@@ -10,8 +10,6 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _API_CTX = ssl.create_default_context()
-_API_CTX.check_hostname = False
-_API_CTX.verify_mode = ssl.CERT_NONE
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",

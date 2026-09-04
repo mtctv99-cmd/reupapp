@@ -73,19 +73,22 @@ class PipelineOrchestrator:
                 await self._progress(idx, name, 1)
 
             update_job(self.job_id, status="done", progress=1.0)
-            job = get_job(self.job_id)
-            logger.info("pipeline done: %s", self.job_id)
-            return job or {"job_id": self.job_id, "status": "done"}
+            self._cleanup_all_temp_files()
+            job = get_job(self.job_id) or {"job_id": self.job_id, "status": "done"}
+            if "output_path" not in job and "video_path" in job:
+                job["output_path"] = job["video_path"]
+            logger.info("pipeline done: %s -> %s", self.job_id, job.get("output_path"))
+            return job
 
         except asyncio.CancelledError:
             update_job(self.job_id, status="cancelled")
+            self._cleanup_all_temp_files()
             raise
         except Exception as exc:
             logger.exception("pipeline failed: %s", exc)
             update_job(self.job_id, status="failed", error=str(exc))
-            raise
-        finally:
             self._cleanup_all_temp_files()
+            raise
 
     async def _progress(self, step_index: int, name: str, sub_progress: float) -> None:
         if self.on_progress:

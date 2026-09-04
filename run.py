@@ -40,6 +40,25 @@ URL = f"http://{HOST}:{PORT}"
 
 
 _SERVER_ERROR = None
+_MUTEX_HANDLE = None
+
+
+def _acquire_single_instance_mutex(mutex_name: str = "SeverDubStudioPro_SingleInstance_Mutex") -> bool:
+    """Tạo Named Mutex trên Windows để đảm bảo chỉ có 1 instance ứng dụng chạy."""
+    global _MUTEX_HANDLE
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        ERROR_ALREADY_EXISTS = 183
+        _MUTEX_HANDLE = kernel32.CreateMutexW(None, False, mutex_name)
+        last_error = kernel32.GetLastError()
+        if last_error == ERROR_ALREADY_EXISTS:
+            return False
+    except Exception:
+        pass
+    return True
 
 
 def _show_error_box(title: str, message: str) -> None:
@@ -152,6 +171,14 @@ def _setup_file_logging():
 
 
 def main():
+    if not _acquire_single_instance_mutex():
+        _show_error_box(
+            "Ứng dụng đang chạy",
+            "Sever Dub Studio Pro đã được khởi chạy trên máy tính của bạn.\n"
+            "Vui lòng kiểm tra trên thanh Taskbar hoặc cửa sổ đang mở."
+        )
+        return
+
     _suppress_stdio()
     _setup_file_logging()
 

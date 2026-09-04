@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.config import settings, app_dir
-from core.db import create_job, list_jobs, get_job, update_job, delete_job
+from core.db import create_job, list_jobs, get_job, update_job, delete_job, reset_stale_running_jobs
 
 logger = logging.getLogger("sever")
 
@@ -33,6 +33,14 @@ async def startup_event():
     import threading
     from core.config import ensure_env_paths
     ensure_env_paths()
+
+    # Thu hồi các job bị kẹt trạng thái running khi app tắt đột ngột
+    try:
+        stale_count = reset_stale_running_jobs()
+        if stale_count > 0:
+            logger.info("Reset %d stale running jobs to failed status", stale_count)
+    except Exception as exc:
+        logger.warning("Failed to reset stale jobs: %s", exc)
 
     from pipeline.step04_stt import preload_stt_model
     threading.Thread(target=preload_stt_model, daemon=True, name="stt-preloader").start()
@@ -99,7 +107,7 @@ def _queue_worker_loop():
             remove_sub = True
 
             # Sync settings into runtime
-            for k in ("aspect_ratio", "logo_path", "logo_position", "logo_opacity", "sub_style", "sub_font_size", "video_speed", "original_volume", "output_dir"):
+            for k in ("aspect_ratio", "bg_style", "bg_color", "logo_path", "logo_position", "logo_opacity", "sub_style", "sub_font_size", "video_speed", "original_volume", "output_dir"):
                 if k in job_settings:
                     settings.set(k, job_settings[k])
 
@@ -419,14 +427,6 @@ async def api_jobs_create(payload: dict):
     video_speed = float(payload.get("video_speed", 1.0))
     original_volume = int(payload.get("original_volume", 100))
     output_dir = str(payload.get("output_dir", "")).strip()
-    if output_dir:
-        settings.set("output_dir", output_dir)
-
-    for key in ("aspect_ratio", "logo_path", "logo_position", "logo_opacity", "sub_style", "sub_font_size"):
-        if key in payload:
-            settings.set(key, payload[key])
-    settings.set("video_speed", video_speed)
-    settings.set("original_volume", original_volume)
 
     job_settings = {
         "voice": voice,
@@ -434,6 +434,8 @@ async def api_jobs_create(payload: dict):
         "original_volume": original_volume,
         "output_dir": output_dir or settings.get("output_dir", ""),
         "aspect_ratio": payload.get("aspect_ratio", settings.get("aspect_ratio", "original")),
+        "bg_style": payload.get("bg_style", settings.get("bg_style", "blur")),
+        "bg_color": payload.get("bg_color", settings.get("bg_color", "black")),
         "sub_style": payload.get("sub_style", settings.get("sub_style", "yellow_black")),
         "sub_font_size": payload.get("sub_font_size", settings.get("sub_font_size", 38)),
         "logo_path": payload.get("logo_path", settings.get("logo_path", "")),

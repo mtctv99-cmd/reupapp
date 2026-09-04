@@ -4,6 +4,7 @@ Dịch từ gemini-stealth-api (G:\\My Drive\\Data_sv4\\gemini-stealth-api).
 Gọi thẳng gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate
 Anonymous access — không cần API key, không cần cookie.
 """
+import asyncio
 import json
 import logging
 import re
@@ -66,7 +67,7 @@ async def gemini_translate(
     full_prompt = "\n\n".join(prompt_parts)
 
     try:
-        raw = _gemini_request_sync(full_prompt, mode, think)
+        raw = await asyncio.to_thread(_gemini_request_sync, full_prompt, mode, think)
         if not raw:
             return None
         text = extract_response_text(raw)

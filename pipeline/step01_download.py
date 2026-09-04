@@ -35,16 +35,16 @@ async def download_video(url: str, output_dir: str, job_id: str) -> dict[str, st
     source = detect_source(url)
 
     if source == "bilibili":
-        # Tier: BBDown -> yt-dlp -> direct API (khong can cookie)
+        # Tier: Direct Mobile/API (tránh 412) -> BBDown -> yt-dlp
         try:
-            res = await _download_bbdown(url, output_dir, job_id)
+            res = await _download_bilibili_direct(url, output_dir, job_id)
         except Exception as exc:
-            logger.warning("BBDown failed (%s), trying yt-dlp...", exc)
+            logger.warning("Bilibili direct download failed (%s), trying BBDown...", exc)
             try:
-                res = await _download_ytdlp(url, output_dir, job_id)
+                res = await _download_bbdown(url, output_dir, job_id)
             except Exception as exc2:
-                logger.warning("yt-dlp failed (%s), trying direct API...", exc2)
-                res = await _download_bilibili_direct(url, output_dir, job_id)
+                logger.warning("BBDown failed (%s), trying yt-dlp...", exc2)
+                res = await _download_ytdlp(url, output_dir, job_id)
     else:
         res = await _download_ytdlp(url, output_dir, job_id)
 
@@ -159,11 +159,32 @@ async def _fetch_title_ytdlp(url: str) -> str:
         except Exception:
             pass
 
-    # 1. Bilibili direct API check (nhanh và lấy đúng 100% tiêu đề chính của phim/video)
+    # 1. Bilibili title: thử mobile web (tránh 412) sau đó direct API
     if "bilibili.com" in url or "b23.tv" in url:
         m = re.search(r'(BV[a-zA-Z0-9]+)', url)
         if m:
             bvid = m.group(1)
+            try:
+                def _bili_mobile_title():
+                    req_m = urllib.request.Request(
+                        f"https://m.bilibili.com/video/{bvid}",
+                        headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"}
+                    )
+                    with urllib.request.urlopen(req_m, timeout=8) as r:
+                        html = r.read().decode("utf-8", errors="replace")
+                    sm = re.search(r'__INITIAL_STATE__\s*=\s*(\{.+?\});', html)
+                    if sm:
+                        data = json.loads(sm.group(1))
+                        t = data.get("video", {}).get("viewInfo", {}).get("title")
+                        if t:
+                            return t.strip()
+                    return ""
+                title = await asyncio.to_thread(_bili_mobile_title)
+                if title:
+                    return title
+            except Exception as exc:
+                logger.debug("Bilibili mobile title fetch fail: %s", exc)
+
             try:
                 def _bili_api():
                     req = urllib.request.Request(
@@ -318,13 +339,7 @@ async def _download_bbdown(url: str, output_dir: str, job_id: str) -> dict[str, 
 
 
 async def _download_bilibili_direct(url: str, output_dir: str, job_id: str) -> dict[str, str]:
-    """Tai truc tiep video Bilibili thong qua API + FFmpeg (khong can cookie).
-
-    Ho tro:
-    - Video thuong: BV... -> x/web-interface/view + x/player/wbi/playurl (wbi signature)
-    - Bangumi (phim ban quyen): /bangumi/play/ep... hoac ss...
-      -> pgc/view/web/season + pgc/player/web/playurl (khong cookie, tranh 412 cua yt-dlp)
-    """
+    """Tai truc tiep video Bilibili thong qua Mobile HTML Parser / API + FFmpeg (khong can cookie, tranh 412)."""
     import urllib.request
     import urllib.parse
     import ssl
@@ -332,26 +347,66 @@ async def _download_bilibili_direct(url: str, output_dir: str, job_id: str) -> d
 
     os.makedirs(output_dir, exist_ok=True)
 
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    bvid_match = re.search(r"(BV[a-zA-Z0-9]+)", url)
+    ep_match = re.search(r"/bangumi/play/ep(\d+)", url)
+    ss_match = re.search(r"/bangumi/play/ss(\d+)", url)
+    bvid_tag = (bvid_match.group(1) if bvid_match else
+                (ep_match.group(1) if ep_match else (ss_match.group(1) if ss_match else "video")))
+    output_path = os.path.join(output_dir, f"{job_id}_{bvid_tag}.mp4")
+
+    # 1. Thu Mobile HTML Parser (uu tien so 1: khong bi 412 anti-bot)
+    if bvid_match:
+        bvid = bvid_match.group(1)
+        try:
+            m_headers = {
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+            req_m = urllib.request.Request(f"https://m.bilibili.com/video/{bvid}", headers=m_headers)
+            with urllib.request.urlopen(req_m, context=ctx, timeout=12) as resp_m:
+                m_html = resp_m.read().decode("utf-8", errors="replace")
+
+            state_m = re.search(r'__INITIAL_STATE__\s*=\s*(\{.+?\});', m_html)
+            if state_m:
+                st_data = json.loads(state_m.group(1))
+                v_obj = st_data.get("video", {})
+                m_title = v_obj.get("viewInfo", {}).get("title") or ""
+                play_urls = v_obj.get("playUrlInfo", [])
+                if play_urls and isinstance(play_urls, list) and play_urls[0].get("url"):
+                    stream_url = play_urls[0]["url"]
+                    dl_headers = {
+                        "User-Agent": m_headers["User-Agent"],
+                        "Referer": "https://m.bilibili.com/",
+                    }
+                    logger.info("Downloading Bilibili video via mobile stream: %s", m_title)
+                    req_dl = urllib.request.Request(stream_url, headers=dl_headers)
+                    with urllib.request.urlopen(req_dl, context=ctx, timeout=300) as r_dl, open(output_path, "wb") as f_out:
+                        while True:
+                            chunk = r_dl.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            f_out.write(chunk)
+                    if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                        logger.info("Bilibili mobile direct download success: %s", output_path)
+                        return {"video_path": output_path, "title": m_title, "source_url": url}
+        except Exception as m_err:
+            logger.warning("Bilibili mobile download failed (%s), fallback to standard API...", m_err)
+
+    # 2. Fallback Standard Desktop Web API
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "Referer": "https://www.bilibili.com/",
         "Origin": "https://www.bilibili.com",
     }
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    # 1. Xac dinh loai URL: bangumi (ep/ss) hay video thuong (BV)
-    ep_match = re.search(r"/bangumi/play/ep(\d+)", url)
-    ss_match = re.search(r"/bangumi/play/ss(\d+)", url)
-    bvid_match = re.search(r"(BV[a-zA-Z0-9]+)", url)
-
     title = ""
     video_stream_url = ""
     audio_stream_url = ""
 
     if ep_match or ss_match:
-        # Bangumi: khong can wbi, khong can cookie
         if ep_match:
             ep_id = ep_match.group(1)
             view_api_url = f"https://api.bilibili.com/pgc/view/web/season?ep_id={ep_id}"
@@ -384,7 +439,6 @@ async def _download_bilibili_direct(url: str, output_dir: str, job_id: str) -> d
             raise RuntimeError(f"Bilibili bangumi playurl API error: {play_data.get('message')}")
         data = play_data.get("result") or play_data.get("data") or {}
     else:
-        # Video thuong: BV -> view + wbi playurl
         if not bvid_match:
             raise ValueError(f"Cannot find BV id from url: {url}")
         bvid = bvid_match.group(1)
@@ -411,7 +465,6 @@ async def _download_bilibili_direct(url: str, output_dir: str, job_id: str) -> d
             raise RuntimeError(f"Bilibili playurl API error: {play_data.get('message')}")
         data = play_data.get("data", {})
 
-    # 2. Chon stream quality cao nhat
     if "dash" in data:
         dash = data["dash"]
         if dash.get("video"):
@@ -426,12 +479,7 @@ async def _download_bilibili_direct(url: str, output_dir: str, job_id: str) -> d
     if not video_stream_url:
         raise RuntimeError("Bilibili API: khong tim thay stream video URL")
 
-    # 3. Tai stream bang urllib (SSL ong hoa) sau do ghep bang FFmpeg
     ffmpeg_bin = find_executable(settings.get("ffmpeg_path", "ffmpeg")) or "ffmpeg"
-    bvid_tag = (bvid_match.group(1) if bvid_match else
-                (ep_match.group(1) if ep_match else (ss_match.group(1) if ss_match else "bangumi")))
-    output_path = os.path.join(output_dir, f"{job_id}_{bvid_tag}.mp4")
-
     download_headers = {
         "Referer": "https://www.bilibili.com/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -442,7 +490,6 @@ async def _download_bilibili_direct(url: str, output_dir: str, job_id: str) -> d
     audio_tmp = os.path.join(output_dir, f"{job_id}_{bvid_tag}_audio.m4s")
 
     try:
-        # Tai video stream
         logger.info("Downloading video stream...")
         req_v = urllib.request.Request(video_stream_url, headers=download_headers)
         with urllib.request.urlopen(req_v, context=ctx, timeout=300) as resp_v:
@@ -452,9 +499,7 @@ async def _download_bilibili_direct(url: str, output_dir: str, job_id: str) -> d
                     if not chunk:
                         break
                     f.write(chunk)
-        logger.info("Video stream downloaded: %s", video_tmp)
 
-        # Tai audio stream
         if audio_stream_url:
             logger.info("Downloading audio stream...")
             req_a = urllib.request.Request(audio_stream_url, headers=download_headers)
@@ -465,9 +510,7 @@ async def _download_bilibili_direct(url: str, output_dir: str, job_id: str) -> d
                         if not chunk:
                             break
                         f.write(chunk)
-            logger.info("Audio stream downloaded: %s", audio_tmp)
 
-        # Ghep video + audio bang FFmpeg
         cmd = [ffmpeg_bin, "-y", "-i", video_tmp]
         if audio_stream_url and os.path.exists(audio_tmp):
             cmd.extend(["-i", audio_tmp, "-c:v", "copy", "-c:a", "aac", "-movflags", "+faststart", output_path])
@@ -480,12 +523,10 @@ async def _download_bilibili_direct(url: str, output_dir: str, job_id: str) -> d
             creationflags=_CREATION_FLAGS,
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
-
         if proc.returncode != 0 or not os.path.exists(output_path):
             err_msg = stderr.decode("utf-8", errors="replace")[-1000:]
             raise RuntimeError(f"FFmpeg merge failed ({proc.returncode}): {err_msg}")
     finally:
-        # Xoa file tam
         for tmp in [video_tmp, audio_tmp]:
             if os.path.exists(tmp):
                 try:

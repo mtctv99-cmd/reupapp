@@ -1,13 +1,15 @@
 {
-  "download_dir": "C:\\Users\\MaiThanhChu\\AppData\\Roaming\\SeverDesktop\\downloads",
-  "output_dir": "C:\\Users\\MaiThanhChu\\Downloads\\New folder",
+  "download_dir": "downloads",
+  "output_dir": "output",
   "stt_provider": "funasr",
   "source_language": "zh",
   "target_language": "vi",
   "remove_sub": true,
   "video_speed": 1.0,
-  "original_volume": 100,
-  "aspect_ratio": "original",
+  "original_volume": 0,
+  "aspect_ratio": "9:16_720p",
+  "bg_style": "black",
+  "bg_color": "black",
   "logo_path": "",
   "logo_position": "top_right",
   "logo_opacity": 0.8,
@@ -67,7 +69,8 @@
       "voice": "ngoc_huyen"
     }
   ],
+  "voice": "ngoc_huyen",
+  "custom_key": "test_val",
   "target_lang": "vi",
-  "test_param": "123",
-  "custom_key": "test_val"
+  "test_param": "123"
 }

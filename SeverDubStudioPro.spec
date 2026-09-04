@@ -7,14 +7,23 @@ rapidocr_dir = os.path.dirname(rapidocr_onnxruntime.__file__)
 
 # ── Bundle STT models (Bản Lite: Tự tải về %APPDATA%/SeverDesktop/models_cache; Bản Full: bundle kèm) ──
 _BUILD_LITE = os.environ.get("BUILD_LITE", "1") == "1"
-_MODELS_CACHE = os.path.join(os.path.expanduser('~'), '.cache', 'modelscope', 'models')
 _models_datas = []
 
-if not _BUILD_LITE and os.path.exists(_MODELS_CACHE):
-    for _d in sorted(os.listdir(_MODELS_CACHE)):
-        _p = os.path.join(_MODELS_CACHE, _d)
-        if os.path.isdir(_p):
-            _models_datas.append((_p, os.path.join('models_cache', 'models', _d)))
+if not _BUILD_LITE:
+    _candidate_dirs = [
+        os.path.join(os.path.expanduser('~'), '.cache', 'modelscope', 'hub', 'models'),
+        os.path.join(os.path.expanduser('~'), '.cache', 'modelscope', 'models'),
+        os.path.join(os.path.expanduser('~'), '.cache', 'modelscope', 'hub'),
+    ]
+    for _base in _candidate_dirs:
+        if os.path.exists(_base):
+            for _root, _dirs, _files in os.walk(_base):
+                for _d in _dirs:
+                    if any(m in _d for m in ('speech_fsmn_vad', 'punc_ct-transformer', 'speech_seaco_paraformer')):
+                        _p = os.path.join(_root, _d)
+                        _models_datas.append((_p, os.path.join('models_cache', 'models', _d)))
+            if _models_datas:
+                break
 
 # ── Dynamic Playwright Driver (Bỏ Chromium 412MB - Dùng msedge/chrome hệ thống) ──
 _playwright_datas = []

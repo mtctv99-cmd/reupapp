@@ -21,13 +21,13 @@ Desktop GUI app automating video subtitle translation and audio dubbing locally.
 8. `pipeline/step08_concat.py`: Merge chunk outputs into final video via FFmpeg concat.
 
 ## Commands
-- **Run Application**: `python run.py` (or execute `CHAY_APP.bat`)
+- **Run Application**: `python run.py` (or execute `run.bat`)
 - **Run All Tests**: `pytest -v` (includes Unit, API, Core, and Playwright E2E tests)
-- **Run Unit Tests**: `python -m unittest tests_check.py` or `pytest test_overlay_timing.py test_core_and_pipeline.py`
+- **Run Unit & Core Tests**: `pytest test_core_and_pipeline.py`
 - **Run API Tests**: `pytest test_api.py`
 - **Run E2E UI Tests**: `pytest test_e2e.py`
-- **Run Standalone Pipeline Test**: `python test_pipeline.py`
-- **Build Windows Executable**: `BUILD.bat` (runs `pyinstaller SeverDubStudioPro.spec --clean --noconfirm`)
+- **Build Windows Executable (Lite)**: `BUILD_LITE.bat` (hoặc `BUILD_SETUP.bat` để tạo installer)
+- **Build Windows Executable (Full Offline)**: `BUILD_FULL.bat`
 
 ## Key Architecture & Coding Constraints
 - **Timing & Subtitles**:

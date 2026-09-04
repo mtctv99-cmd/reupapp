@@ -76,15 +76,22 @@
         <div class="studio-config-section">
           <div class="section-subtitle">⚙️ Cấu Hình Video & Thuyết Minh</div>
           <div class="config-cards-grid">
-            <div class="config-card">
-              <div class="config-card-header"><span class="config-icon">📐</span><span class="config-card-title">Tỉ Lệ Khung Hình</span></div>
-              <select id="select-aspect-ratio" class="custom-select">
-                <option value="original" selected>✨ Giữ Gốc (100%)</option>
-                <option value="16:9_720p">YouTube Ngang 16:9</option>
-                <option value="3:4_720p">Facebook 3:4</option>
-                <option value="9:16_720p">TikTok Dọc 9:16</option>
-              </select>
-            </div>
+	            <div class="config-card">
+	              <div class="config-card-header"><span class="config-icon">📐</span><span class="config-card-title">Tỉ Lệ & Nền Viền</span></div>
+	              <div style="display: flex; gap: 4px; width: 100%;">
+		                <select id="select-aspect-ratio" class="custom-select" style="flex: 1.4;" onchange="if(window.updateBgStyleVisibility) window.updateBgStyleVisibility();">
+	                  <option value="original" selected>✨ Giữ Gốc (100%)</option>
+	                  <option value="16:9_720p">YouTube Ngang 16:9</option>
+	                  <option value="3:4_1080p">Facebook 3:4 Full HD</option>
+	                  <option value="9:16_720p">TikTok Dọc 9:16</option>
+	                </select>
+	                <select id="select-bg-style" class="custom-select-mini" style="width: 100px;" title="Kiểu nền khoảng trống viền">
+	                  <option value="blur" selected>Nền Mờ (Blur)</option>
+	                  <option value="black">Nền Đen</option>
+	                  <option value="white">Nền Trắng</option>
+	                </select>
+	              </div>
+	            </div>
 
             <div class="config-card">
               <div class="config-card-header"><span class="config-icon">🗣️</span><span class="config-card-title">Giọng Thuyết Minh</span></div>
@@ -351,6 +358,6 @@
   <!-- Toast Notifications -->
   <div id="toast-container" class="toast-container"></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=2.1"></script>
 </body>
 </html>

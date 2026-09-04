@@ -112,6 +112,8 @@ def _defaults() -> dict[str, Any]:
         "video_speed": 1.0,
         "original_volume": 100,
         "aspect_ratio": "original",
+        "bg_style": "blur",
+        "bg_color": "black",
         "logo_path": "",
         "logo_position": "top_right",
         "logo_opacity": 0.8,

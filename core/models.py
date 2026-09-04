@@ -169,20 +169,29 @@ def check_models_installed() -> dict[str, Any]:
             if all_exist:
                 return {"ready": True, "location": "bundled", "models": MODELS_LIST}
 
-    # 2. Kiểm tra trong %APPDATA%/SeverDesktop/models_cache/models
+    # 2. Kiểm tra trong %APPDATA%/SeverDesktop/models_cache
+    app_cache = get_models_cache_dir()
     app_models = get_modelscope_models_dir()
     all_exist = True
     missing = []
     for m in MODELS_LIST:
-        mf = app_models / m["folder"]
-        nested_mf = app_models / "iic" / m["folder"]
-        if (mf.exists() and any(mf.iterdir())) or (nested_mf.exists() and any(nested_mf.iterdir())):
-            continue
-        # 3. Kiểm tra fallback cache mặc định ~/.cache/modelscope/hub/models
-        home_ms = Path.home() / ".cache" / "modelscope" / "hub" / "models"
-        home_mf = home_ms / m["folder"]
-        home_nested = home_ms / "iic" / m["folder"]
-        if (home_mf.exists() and any(home_mf.iterdir())) or (home_nested.exists() and any(home_nested.iterdir())):
+        f_name = m["folder"]
+        candidates = [
+            app_models / f_name,
+            app_models / "iic" / f_name,
+            app_models / f"iic--{f_name}",
+            app_cache / "hub" / "models" / f_name,
+            app_cache / "hub" / "models" / "iic" / f_name,
+            app_cache / "hub" / "models" / f"iic--{f_name}",
+            app_cache / "models" / f_name,
+            app_cache / "models" / "iic" / f_name,
+            app_cache / "models" / f"iic--{f_name}",
+            Path.home() / ".cache" / "modelscope" / "hub" / "models" / f_name,
+            Path.home() / ".cache" / "modelscope" / "hub" / "models" / "iic" / f_name,
+            Path.home() / ".cache" / "modelscope" / "hub" / "models" / f"iic--{f_name}",
+            Path.home() / ".cache" / "modelscope" / "hub" / f_name,
+        ]
+        if any(c.exists() and any(c.iterdir()) for c in candidates):
             continue
 
         all_exist = False
@@ -214,6 +223,12 @@ def download_all_models_sync(progress_cb: Callable[[dict], None] | None = None) 
     os.environ["HUB_CACHE"] = target_dir
 
     try:
+        from pipeline.step04_stt import _UNPATCH_MODELSCOPE_FOR_DOWNLOAD
+        _UNPATCH_MODELSCOPE_FOR_DOWNLOAD()
+    except Exception:
+        pass
+
+    try:
         from modelscope.hub.snapshot_download import snapshot_download
         total_mb = sum(m["approx_mb"] for m in MODELS_LIST)
         done_mb = 0
@@ -227,11 +242,22 @@ def download_all_models_sync(progress_cb: Callable[[dict], None] | None = None) 
                 progress_cb(DOWNLOAD_STATE)
 
             logger.info("Downloading AI model %d/%d: %s (%s)...", i + 1, len(MODELS_LIST), m["name"], m["id"])
-            snapshot_download(
-                model_id=m["id"],
-                cache_dir=target_dir,
-                local_files_only=False,
-            )
+            max_retries = 3
+            for attempt in range(1, max_retries + 1):
+                try:
+                    snapshot_download(
+                        model_id=m["id"],
+                        cache_dir=target_dir,
+                        local_files_only=False,
+                    )
+                    break
+                except Exception as dl_err:
+                    if attempt == max_retries:
+                        raise dl_err
+                    logger.warning("Download %s failed (attempt %d/%d): %s. Retrying in 3s...", m["name"], attempt, max_retries, dl_err)
+                    import time
+                    time.sleep(3)
+
             done_mb += m["approx_mb"]
             with _DOWNLOAD_LOCK:
                 DOWNLOAD_STATE["downloaded_mb"] = done_mb

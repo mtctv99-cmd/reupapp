@@ -38,6 +38,7 @@ def register_stt(name: str):
 
 _FUNASR_MODELS: dict[tuple, Any] = {}
 _FUNASR_LOCK = threading.Lock()
+_FUNASR_INFERENCE_LOCK = threading.Lock()
 
 
 def _patch_frozen_torch_jit():
@@ -64,18 +65,22 @@ def _patch_frozen_torch_jit():
         pass
 
 
+_ORIG_SNAPSHOT_DOWNLOAD = None
+
+
 def _patch_modelscope_offline():
     """Force modelscope local-only: models đã bundle sẵn, không cần gọi hub.
     snapshot_download hay check_local_model_is_latest vẫn request network (có thể
     hang vô hạn khi mạng flaky/không vào được aliyun)."""
+    global _ORIG_SNAPSHOT_DOWNLOAD
     try:
         import modelscope.hub.snapshot_download as _ms_ss
         if not getattr(_ms_ss, "_SEVER_OFFLINE_PATCHED", False):
-            _orig_ss = _ms_ss.snapshot_download
+            _ORIG_SNAPSHOT_DOWNLOAD = _ms_ss.snapshot_download
 
             def _offline_ss(*args, **kwargs):
                 kwargs["local_files_only"] = True
-                return _orig_ss(*args, **kwargs)
+                return _ORIG_SNAPSHOT_DOWNLOAD(*args, **kwargs)
 
             _ms_ss.snapshot_download = _offline_ss
             _ms_ss._SEVER_OFFLINE_PATCHED = True
@@ -86,6 +91,18 @@ def _patch_modelscope_offline():
         import modelscope.hub.check_model as _ms_chk
         _ms_chk.check_local_model_is_latest = lambda *a, **k: None
         logger.info("modelscope check_local_model_is_latest disabled")
+    except Exception:
+        pass
+
+
+def _UNPATCH_MODELSCOPE_FOR_DOWNLOAD():
+    """Tạm gỡ patch local_files_only để hàm download model tải được từ internet."""
+    global _ORIG_SNAPSHOT_DOWNLOAD
+    try:
+        import modelscope.hub.snapshot_download as _ms_ss
+        if _ORIG_SNAPSHOT_DOWNLOAD is not None:
+            _ms_ss.snapshot_download = _ORIG_SNAPSHOT_DOWNLOAD
+            _ms_ss._SEVER_OFFLINE_PATCHED = False
     except Exception:
         pass
 
@@ -103,13 +120,19 @@ def _get_funasr_model(cfg: dict) -> Any:
         model = _FUNASR_MODELS.get(key)
         if model is None:
             # Ensure modelscope cache paths are set
-            from core.models import get_models_cache_dir
+            from core.models import get_models_cache_dir, check_models_installed
             cache_p = str(get_models_cache_dir())
             os.environ.setdefault("MODELSCOPE_CACHE", cache_p)
             os.environ.setdefault("HUB_CACHE", cache_p)
 
             _patch_frozen_torch_jit()
-            _patch_modelscope_offline()
+            # Chỉ force offline khi toàn bộ 3 model đã được tải hoàn tất
+            # Nếu chưa có model mà patch offline, AutoModel sẽ lập tức văng lỗi file not found
+            if check_models_installed()["ready"]:
+                _patch_modelscope_offline()
+            else:
+                _UNPATCH_MODELSCOPE_FOR_DOWNLOAD()
+
             from funasr import AutoModel
             try:
                 model = AutoModel(
@@ -155,35 +178,36 @@ def _set_segment_start(seg: dict, new_start: float) -> None:
     seg["duration_ms"] = round(max(0.0, (seg.get("end", 0) - new_start) * 1000.0), 1)
 
 
-# ── STT Parameters (tuned cho TTS Pacing: Chinese → Vietnamese dub) ─────
+# ── STT Parameters (Tối ưu phân đoạn thoại tự nhiên cho Video tốc độ cao) ─────
 
-_MAX_SEGMENT_CHARS = 24       # Số ký tự tối đa trước khi cân nhắc tách câu
-_TARGET_SEGMENT_SECONDS = 3.5  # Thời lượng chuẩn của 1 câu thoại mượt (2.5s - 4.5s)
+_MAX_SEGMENT_CHARS = 28        # Số ký tự tiếng Trung tối đa của 1 câu thoại gọn
+_TARGET_SEGMENT_SECONDS = 3.5  # Thời lượng chuẩn 1 câu thoại (2.0s - 3.5s)
 
-# Refine — Chỉ cắt dấu phẩy nhẹ khi câu dài > 3.8s hoặc > 18 chữ
-_REFINE_THRESHOLD = 3.8
+# Refine — Chỉ cắt dấu ngắt mạnh (. ! ? 。 ！ ？ ； ; : ：), TRỪ dấu phẩy (chỉ cắt phẩy khi câu quá dài > 4.5s hoặc > 30 chữ)
+_REFINE_THRESHOLD = 4.2
 _REFINE_SPLIT_MAX = 3.5
 
-# Split long — trần tối đa cho câu thoại TTS dài (tránh câu đọc lê thê)
+# Split long — trần tối đa cho câu thoại TTS dài (tránh câu đọc lê thê quá 4.5s)
 _SPLIT_LONG_THRESHOLD = 4.5
 
-# Token / Silence splitting
-_MIN_SILENCE_TOKEN_GAP_MS = 380.0  # Chỉ cắt theo khoảng lặng token khi nghỉ thật sự >= 380ms
+# Token / Silence splitting — ngắt câu khi khoảng lặng âm tiết >= 350ms
+_MIN_SILENCE_TOKEN_GAP_MS = 350.0
 
-# Merge fragmented — tự động gộp các câu thoại vụn (< 1.5s hoặc < 6 ký tự)
-_MERGE_MAX_GAP_MS = 300
-_MERGE_TARGET_SECONDS = 3.8
-_MERGE_MAX_CHARS = 22
+# Merge fragmented — chỉ gom mảnh khi câu trước KHÔNG có dấu kết thúc câu (gap <= 450ms, max 3.5s / 28 ký tự)
+_MERGE_MAX_GAP_MS = 450
+_MERGE_TARGET_SECONDS = 3.5
+_MERGE_MAX_CHARS = 28
 _MERGE_SHORT_DURATION = 1.5
 _MERGE_SHORT_CHARS = 6
 
 # Audio cleanup (pydub)
 _SILENCE_THRESH_OFFSET_DB = 16
 _MIN_SILENCE_MS = 320
-_SHORT_FILLER_MAX_DURATION = 0.6
+_SHORT_FILLER_MAX_DURATION = 0.5
 _SHORT_TEXT_LONG_SEGMENT_CHARS = 4
 _SHORT_TEXT_LONG_SEGMENT_SECONDS = 3.5
 _SHORT_TEXT_ISLAND_MIN_GAP_MS = 320
+_MIN_VALID_SEGMENT_DURATION = 0.45  # Lọc bỏ rác âm thanh < 0.45s
 _MAX_GAP_FILL_SECONDS = 0.35
 
 
@@ -267,44 +291,22 @@ def split_by_silence_tokens(segments: list[dict], min_silence_ms: float = _MIN_S
 
 def refine_segments(segments: list[dict]) -> list[dict]:
     """Phân đoạn thông minh cho TTS:
-    1. Ưu tiên cắt tại dấu ngắt câu MẠNH (chấm, chấm hỏi, chấm than, chấm phẩy, xuống dòng: . ! ? 。 ！ ？ ； ; \n)
-    2. Chỉ cắt tại dấu ngắt câu NHẸ (phẩy, hai chấm: ， , 、 : ：) KHI câu dài > 3.8s hoặc > 18 chữ.
-    Giúp câu thoại giữ nguyên vẹn mệnh đề và ngữ cảnh, TTS đọc liền mạch, truyền cảm, không bị ngắt vụn.
+    1. Ưu tiên ngắt tại tất cả các dấu ngắt câu mạnh: . ! ? 。 ！ ？ ； ; : ： \n
+    2. TUYỆT ĐỐI KHÔNG ngắt ở dấu phẩy (， , 、) để giữ nguyên vẹn cụm mệnh đề nghĩa.
+       Chỉ cắt cưỡng bức khi một câu quá dài không có dấu chấm/chấm phẩy (split_long_segments).
     """
     refined = []
     for seg in segments:
         text = str(seg.get("text", "") or seg.get("src_text", "")).strip()
         duration = float(seg.get("duration", 0.0))
-        if duration <= _REFINE_THRESHOLD and len(text) <= _MAX_SEGMENT_CHARS:
-            refined.append(seg)
-            continue
 
-        # 1. Thử cắt theo dấu ngắt câu mạnh trước
-        strong_pts = [m.end() for m in re.finditer(r'[.!?。！？；;\n]+', text)]
+        # Tìm các điểm ngắt câu mạnh (chấm, hỏi, than, chấm phẩy, hai chấm, xuống dòng - TRỪ dấu phẩy)
+        strong_pts = [m.end() for m in re.finditer(r'[.!?。！？；;:：\n]+', text)]
         strong_pts = sorted(set(p for p in strong_pts if 0 < p < len(text)))
 
         if strong_pts:
             subs = _split_by_points(seg, strong_pts, _REFINE_SPLIT_MAX)
-            # Kiểm tra xem các câu con có câu nào vẫn quá dài cần cắt thêm dấu phẩy không
-            for s in subs:
-                s_dur = float(s.get("duration", 0.0))
-                s_txt = str(s.get("text", "")).strip()
-                if s_dur > _REFINE_THRESHOLD or len(s_txt) > _MAX_SEGMENT_CHARS:
-                    weak_pts = [m.end() for m in re.finditer(r'[，,、:：]+', s_txt)]
-                    weak_pts = sorted(set(p for p in weak_pts if 0 < p < len(s_txt)))
-                    if weak_pts:
-                        refined.extend(_split_by_points(s, weak_pts, _REFINE_SPLIT_MAX))
-                    else:
-                        refined.append(s)
-                else:
-                    refined.append(s)
-            continue
-
-        # 2. Nếu không có dấu ngắt câu mạnh -> Cắt theo dấu ngắt câu nhẹ
-        weak_pts = [m.end() for m in re.finditer(r'[，,、:：]+', text)]
-        weak_pts = sorted(set(p for p in weak_pts if 0 < p < len(text)))
-        if weak_pts:
-            refined.extend(_split_by_points(seg, weak_pts, _REFINE_SPLIT_MAX))
+            refined.extend(subs)
         else:
             refined.append(seg)
     return refined
@@ -327,7 +329,7 @@ def split_long_segments(segments: list[dict], max_duration: float = _SPLIT_LONG_
                 result.extend(subs)
                 continue
 
-        punc_pts = [m.end() for m in re.finditer(r'[.!?。！？；;，,、:：]+', text)]
+        punc_pts = [m.end() for m in re.finditer(r'[.!?。！？；;:：\n]+', text)]
         punc_pts = sorted(set(p for p in punc_pts if 0 < p < len(text)))
         if punc_pts:
             subs = _split_by_points(seg, punc_pts, max_duration)
@@ -450,56 +452,75 @@ def _split_by_points(seg: dict, split_points: list[int], max_duration: float = _
 
 
 def merge_fragmented_segments(segments: list[dict]) -> list[dict]:
-    """Ghep fragment ngan (<1.2s hoac <6 ky tu) — theo V2."""
+    """Ghep cac cau thoai vuong vuc, noi ngat quang hoac chua het y thanh cau hoan chinh."""
     if len(segments) < 2:
         return segments
 
-    merged = [dict(segments[0])]
-    for seg in segments[1:]:
-        prev = merged[-1]
-        prev_text = str(prev.get("text") or "").strip()
-        seg_text = str(seg.get("text") or "").strip()
-        gap_ms = float(seg.get("start_ms", 0.0)) - float(prev.get("end_ms", 0.0))
-        combined_chars = len(prev_text) + len(seg_text)
-        combined_secs = float(seg.get("end", 0.0)) - float(prev.get("start", 0.0))
+    def _single_pass(segs: list[dict]) -> tuple[list[dict], bool]:
+        if len(segs) < 2:
+            return segs, False
+        merged = [dict(segs[0])]
+        changed = False
+        for seg in segs[1:]:
+            prev = merged[-1]
+            prev_text = str(prev.get("text") or "").strip()
+            seg_text = str(seg.get("text") or "").strip()
+            gap_ms = float(seg.get("start_ms", 0.0)) - float(prev.get("end_ms", 0.0))
+            combined_chars = len(prev_text) + len(seg_text)
+            combined_secs = float(seg.get("end", 0.0)) - float(prev.get("start", 0.0))
 
-        prev_frag = (float(prev.get("duration") or 0.0) <= _MERGE_SHORT_DURATION
-                     or len(prev_text) <= _MERGE_SHORT_CHARS)
-        seg_frag = (float(seg.get("duration") or 0.0) <= _MERGE_SHORT_DURATION
-                    or len(seg_text) <= _MERGE_SHORT_CHARS)
+            prev_frag = (float(prev.get("duration") or 0.0) <= _MERGE_SHORT_DURATION
+                         or len(prev_text) <= _MERGE_SHORT_CHARS)
+            seg_frag = (float(seg.get("duration") or 0.0) <= _MERGE_SHORT_DURATION
+                        or len(seg_text) <= _MERGE_SHORT_CHARS)
 
-        # ponytail: khong ghep neu ca truoc ket thuc bang dau cau manh
-        ends_sentence = bool(re.search(r'[.!?。！？；;]$', prev_text))
+            # Khong ghep neu cau truoc da ket thuc bang dau cham / dau hoi / cham than ro rang
+            ends_sentence = bool(re.search(r'[.!?。！？\n]$', prev_text))
 
-        if (prev_text and seg_text and (prev_frag or seg_frag)
-                and 0.0 <= gap_ms <= _MERGE_MAX_GAP_MS
-                and combined_chars <= _MERGE_MAX_CHARS
-                and combined_secs <= _MERGE_TARGET_SECONDS
-                and not ends_sentence):
-            # ponytail: khong ghep neu ca truoc ket thuc bang dau cau manh
-
-            joined = dict(prev)
-            joined_text = (prev_text + seg_text).strip()
-            joined["text"] = joined_text
-            joined["src_text"] = joined_text
-            # ponytail: Properly merge token_timestamps with gap interpolation.
-            # When prev ends at 5.0s and seg starts at 5.2s, raw concat creates
-            # a 0.2s dead zone in the merged timeline. Shift seg timestamps forward
-            # to fill the gap so _split_by_token_timestamps gets clean input.
-            prev_ts = list(prev.get("token_timestamps") or [])
-            seg_ts = list(seg.get("token_timestamps") or [])
-            if prev_ts and seg_ts and gap_ms > 0:
-                gap_s = gap_ms / 1000.0
-                shifted_seg_ts = [(ts_start + gap_s * 1000, ts_end + gap_s * 1000)
-                                  for ts_start, ts_end in seg_ts]
-                joined["token_timestamps"] = prev_ts + shifted_seg_ts
-            else:
+            if (prev_text and seg_text and (prev_frag or seg_frag or not ends_sentence)
+                    and 0.0 <= gap_ms <= _MERGE_MAX_GAP_MS
+                    and combined_chars <= _MERGE_MAX_CHARS
+                    and combined_secs <= _MERGE_TARGET_SECONDS
+                    and not ends_sentence):
+                joined = dict(prev)
+                # Neu giua 2 cau chua co dau ngan cach thi noi lien
+                joined_text = (prev_text + seg_text).strip()
+                joined["text"] = joined_text
+                joined["src_text"] = joined_text
+                prev_ts = list(prev.get("token_timestamps") or [])
+                seg_ts = list(seg.get("token_timestamps") or [])
                 joined["token_timestamps"] = prev_ts + seg_ts
-            _set_segment_end(joined, float(seg.get("end", prev.get("end", 0.0))))
-            merged[-1] = joined
-        else:
-            merged.append(dict(seg))
-    return merged
+                _set_segment_end(joined, float(seg.get("end", prev.get("end", 0.0))))
+                merged[-1] = joined
+                changed = True
+            else:
+                merged.append(dict(seg))
+        return merged, changed
+
+    # Chay multi-pass merge (toi da 3 vong) de gom het tat ca cac manh vuon lien ke
+    curr = segments
+    for _ in range(3):
+        curr, changed = _single_pass(curr)
+        if not changed:
+            break
+    return curr
+
+
+def filter_isolated_noise_segments(segments: list[dict]) -> list[dict]:
+    """Loai bo cac am thanh rac vo nghia, tieng tho hoac tu don le < 0.35s do ASR nhan nham."""
+    valid = []
+    _GARBAGE_SINGLE_CHARS = frozenset({"e", "o", "a", "u", "i", "ze", "th", "磨", "得", "成", "的", "了"})
+    for seg in segments:
+        text = str(seg.get("text") or seg.get("src_text") or "").strip()
+        dur = float(seg.get("duration") or 0.0)
+        # 1. Loc segment qua ngan co ky tu rac dung co lap
+        if dur < _MIN_VALID_SEGMENT_DURATION and (len(text) <= 2 or text.lower() in _GARBAGE_SINGLE_CHARS):
+            continue
+        # 2. Loc segment chi chua ky tu latin don le vo nghia
+        if re.match(r"^[a-zA-Z]{1,2}$", text) and dur < 0.5:
+            continue
+        valid.append(seg)
+    return valid
 
 
 # ── Audio Energy Cleanup (theo V2) ───────────────────────
@@ -698,20 +719,22 @@ async def stt_funasr(audio_path: str, source_lang: str = "zh", **kwargs) -> list
         except Exception as fb_err:
             raise RuntimeError(f"STT failed: FunASR initialization error ({err}), fallback OpenAI error ({fb_err})") from err
 
-    try:
-        import torch
-        with torch.inference_mode():
-            result = await asyncio.to_thread(
-                model.generate,
-                input=audio_path, batch_size=1, sentence_timestamp=True,
-                return_raw_text=True, max_single_segment_time=10000, vad_tail_silence=250,
-            )
-    except Exception:
-        result = await asyncio.to_thread(
-            model.generate,
-            input=audio_path, batch_size=1, sentence_timestamp=True,
-            return_raw_text=True, max_single_segment_time=10000, vad_tail_silence=250,
-        )
+    def _do_generate():
+        with _FUNASR_INFERENCE_LOCK:
+            try:
+                import torch
+                with torch.inference_mode():
+                    return model.generate(
+                        input=audio_path, batch_size=1, sentence_timestamp=True,
+                        return_raw_text=True, max_single_segment_time=10000, vad_tail_silence=250,
+                    )
+            except Exception:
+                return model.generate(
+                    input=audio_path, batch_size=1, sentence_timestamp=True,
+                    return_raw_text=True, max_single_segment_time=10000, vad_tail_silence=250,
+                )
+
+    result = await asyncio.to_thread(_do_generate)
 
     # Parse result
     if result is None:
@@ -784,6 +807,7 @@ async def stt_funasr(audio_path: str, source_lang: str = "zh", **kwargs) -> list
     segments = clean_segments_with_audio(segments, audio_path)
     segments.sort(key=lambda s: s.get("start", 0))
     segments = merge_fragmented_segments(segments)
+    segments = filter_isolated_noise_segments(segments)
     segments = fill_segment_gaps(segments, audio_path)
     return segments
 

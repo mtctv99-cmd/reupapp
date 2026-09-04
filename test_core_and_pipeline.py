@@ -87,3 +87,47 @@ def test_step07_smart_word_wrap():
     assert " ".join(lines) == long_text
 
 
+def test_step05_split_translated_segments():
+    from pipeline.step05_translate import _split_translated_segments
+    # Long segment with period in middle -> split into 2 sub-segments with proportional time
+    segs = [{
+        "start": 10.0,
+        "end": 16.0,
+        "duration": 6.0,
+        "text": "这是第一句话。这是第二句话。",
+        "translated_text": "Đây là câu thứ nhất. Đây là câu thứ hai.",
+    }]
+    split_res = _split_translated_segments(segs)
+    assert len(split_res) == 2
+    assert split_res[0]["translated_text"] == "Đây là câu thứ nhất."
+    assert split_res[1]["translated_text"] == "Đây là câu thứ hai."
+    assert split_res[0]["start"] == 10.0
+    assert split_res[1]["end"] == 16.0
+    assert split_res[0]["end"] == split_res[1]["start"]
+
+
+
+def test_db_reset_stale_running_jobs():
+    from core.db import create_job, update_job, get_job, reset_stale_running_jobs
+    job_id = create_job("https://test.com", "Test Stale Job")
+    update_job(job_id, status="running")
+    assert get_job(job_id)["status"] == "running"
+
+    reset_count = reset_stale_running_jobs()
+    assert reset_count >= 1
+    assert get_job(job_id)["status"] == "failed"
+    assert "khởi động lại" in get_job(job_id)["error"]
+
+
+def test_step04_stt_merge_timestamps_absolute():
+    from pipeline.step04_stt import merge_fragmented_segments
+    segs = [
+        {"text": "Chào", "start": 1.0, "end": 2.0, "start_ms": 1000, "end_ms": 2000, "token_timestamps": [(1000, 1500), (1500, 2000)]},
+        {"text": "bạn", "start": 2.2, "end": 3.0, "start_ms": 2200, "end_ms": 3000, "token_timestamps": [(2200, 2600), (2600, 3000)]},
+    ]
+    merged = merge_fragmented_segments(segs)
+    assert len(merged) == 1
+    assert merged[0]["token_timestamps"] == [(1000, 1500), (1500, 2000), (2200, 2600), (2600, 3000)]
+
+
+
