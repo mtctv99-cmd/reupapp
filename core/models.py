@@ -140,14 +140,14 @@ def download_missing_binaries(progress_cb: Callable[[str], None] | None = None) 
 
 def get_models_cache_dir() -> Path:
     """Trả về thư mục chứa cache model của app.
-    Khi chạy đóng gói (Frozen): Ưu tiên thư mục models_cache nhúng sẵn trong bundle (_MEIPASS/models_cache).
+    Khi chạy đóng gói (Frozen): Ưu tiên thư mục models_cache nhúng sẵn trong bundle (_MEIPASS/models_cache hoặc _MEIPASS/_internal/models_cache).
     Khi phát triển: Trỏ về %APPDATA%/SeverDesktop/models_cache.
     """
     if getattr(sys, "frozen", False):
         meipass = Path(getattr(sys, "_MEIPASS", ""))
-        bundled = meipass / "models_cache"
-        if bundled.exists():
-            return bundled
+        for cand in (meipass / "models_cache", meipass / "_internal" / "models_cache"):
+            if cand.exists():
+                return cand
     p = app_dir() / "models_cache"
     p.mkdir(parents=True, exist_ok=True)
     return p
@@ -166,21 +166,25 @@ def check_models_installed() -> dict[str, Any]:
     # 1. Kiểm tra trong bundle (nếu là bản Full)
     if getattr(sys, "frozen", False):
         meipass = Path(getattr(sys, "_MEIPASS", ""))
-        bundled = meipass / "models_cache" / "models"
-        if bundled.exists():
-            all_exist = True
-            for m in MODELS_LIST:
-                f_name = m["folder"]
-                b_candidates = [
-                    bundled / f_name,
-                    bundled / "iic" / f_name,
-                    bundled / f"iic--{f_name}",
-                ]
-                if not any(c.exists() and any(c.iterdir()) for c in b_candidates):
-                    all_exist = False
-                    break
-            if all_exist:
-                return {"ready": True, "location": "bundled", "models": MODELS_LIST}
+        bundled_candidates = [
+            meipass / "models_cache" / "models",
+            meipass / "_internal" / "models_cache" / "models",
+        ]
+        for bundled in bundled_candidates:
+            if bundled.exists():
+                all_exist = True
+                for m in MODELS_LIST:
+                    f_name = m["folder"]
+                    b_candidates = [
+                        bundled / f_name,
+                        bundled / "iic" / f_name,
+                        bundled / f"iic--{f_name}",
+                    ]
+                    if not any(c.exists() and any(c.iterdir()) for c in b_candidates):
+                        all_exist = False
+                        break
+                if all_exist:
+                    return {"ready": True, "location": "bundled", "models": MODELS_LIST}
 
     # 2. Kiểm tra trong %APPDATA%/SeverDesktop/models_cache
     app_cache = get_models_cache_dir()

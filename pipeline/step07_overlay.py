@@ -140,24 +140,29 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
 
     if target_w > 0 and target_h > 0:
         zoom_out = "[vzoom]"
-        # Trường hợp đặc biệt: Nếu video nguồn dạng dọc 9:16 (~0.5625) mà đưa vào khung 3:4 (0.75)
-        # -> Video nguồn đã có tỷ lệ dọc cao hơn 3:4, chỉ cần crop nhẹ 2 phần trên/dưới để lấp đầy 100% khung hình
         is_source_9_16 = (orig_w > 0 and orig_h > 0 and abs((orig_w / orig_h) - (9 / 16)) < 0.08)
-        if ("3:4" in aspect_ratio or "3*4" in aspect_ratio) and is_source_9_16:
-            v_chains.append(f"{curr_v}scale={target_w}:-1,crop={target_w}:{target_h}:0:(ih-{target_h})/2{zoom_out}")
-            curr_v = zoom_out
-        elif bg_style == "blur":
-            # Nền mờ nghệ thuật chuyển động theo video
+        if bg_style == "blur":
+            # Nền mờ nghệ thuật chuyển động theo video: chuẩn hóa SAR=1, crop tâm, scale chẵn pixel
             v_chains.append(
-                f"{curr_v}split[vbg_in][vfg_in];"
-                f"[vbg_in]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=25:5[vbg_blur];"
-                f"[vfg_in]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease[vfg_scaled];"
-                f"[vbg_blur][vfg_scaled]overlay=(W-w)/2:(H-h)/2{zoom_out}"
+                f"{curr_v}setsar=1,split[vbg_in][vfg_in];"
+                f"[vbg_in]scale=w={target_w}:h={target_h}:force_original_aspect_ratio=increase,"
+                f"crop=w={target_w}:h={target_h}:x=(in_w-{target_w})/2:y=(in_h-{target_h})/2,"
+                f"boxblur=25:5,setsar=1[vbg_blur];"
+                f"[vfg_in]scale=w={target_w}:h={target_h}:force_original_aspect_ratio=decrease,"
+                f"scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[vfg_scaled];"
+                f"[vbg_blur][vfg_scaled]overlay=x=(W-w)/2:y=(H-h)/2:format=auto{zoom_out}"
             )
+            curr_v = zoom_out
+        elif ("3:4" in aspect_ratio or "3*4" in aspect_ratio) and is_source_9_16:
+            v_chains.append(f"{curr_v}scale={target_w}:-1,crop={target_w}:{target_h}:(iw-{target_w})/2:(ih-{target_h})/2,setsar=1{zoom_out}")
             curr_v = zoom_out
         else:
             # Màu nền cố định (Đen, Trắng, ...)
-            scale_pad = f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,pad={target_w}:{target_h}:({target_w}-iw)/2:({target_h}-ih)/2:color={pad_color}"
+            scale_pad = (
+                f"scale=w={target_w}:h={target_h}:force_original_aspect_ratio=decrease,"
+                f"scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1,"
+                f"pad={target_w}:{target_h}:({target_w}-iw)/2:({target_h}-ih)/2:color={pad_color}"
+            )
             v_chains.append(f"{curr_v}{scale_pad}{zoom_out}")
             curr_v = zoom_out
 
