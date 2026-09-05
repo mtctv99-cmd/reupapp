@@ -680,8 +680,8 @@ async def run_translate(
             val = seg.get("text", "").strip()
         result.append({**seg, "translated_text": val})
 
-    # Tách sub-sentences nếu câu dịch có chứa dấu chấm/dứt câu ở giữa (tránh sub dài 2 dòng)
-    return _split_translated_segments(result)
+    # Giữ nguyên mốc thời gian chuẩn xác của STT (không chia mốc ảo theo số ký tự để tránh trôi lệch khẩu hình)
+    return result
 
 
 def _split_translated_segments(segments: list[dict]) -> list[dict]:
@@ -788,14 +788,12 @@ async def _translate_funnel(texts: list[str], pending_idx: list[int],
             _start_tier_cooldown(f"tier:{tier_name}:{tier.get('model', '')}", duration=60)
             continue
 
-        if translated is None:
+        if translated is None or len(translated) != len(pending_texts):
+            # Nếu model trả thiếu/lệch số lượng phần tử -> Không ánh xạ để tránh trôi hàng lệch sang câu khác
             continue
 
         still_pending: list[int] = []
         for pos, orig_idx in enumerate(pending_idx):
-            if pos >= len(translated):
-                still_pending.append(orig_idx)
-                continue
             val = str(translated[pos]).strip()
             orig = texts[orig_idx]
             if val and val != orig and validator.is_valid(orig, val):
@@ -808,16 +806,15 @@ async def _translate_funnel(texts: list[str], pending_idx: list[int],
         logger.info("translate: google fallback for %d segments", len(pending_idx))
         pending_texts = [texts[i] for i in pending_idx]
         g_res = await _translate_google(pending_texts, source_lang, target_lang)
-        if g_res:
+        if g_res and len(g_res) == len(pending_texts):
             still_pending: list[int] = []
             for pos, orig_idx in enumerate(pending_idx):
-                if pos < len(g_res):
-                    g_val = validator.clean_text(str(g_res[pos]).strip())
-                    orig = texts[orig_idx]
-                    if g_val and g_val != orig and validator.is_valid(orig, g_val):
-                        translated_map[orig_idx] = g_val
-                        continue
-                still_pending.append(orig_idx)
+                g_val = validator.clean_text(str(g_res[pos]).strip())
+                orig = texts[orig_idx]
+                if g_val and g_val != orig and validator.is_valid(orig, g_val):
+                    translated_map[orig_idx] = g_val
+                else:
+                    still_pending.append(orig_idx)
             pending_idx[:] = still_pending
 
 def _align_translated_length(translated: list[str], target_len: int) -> list[str]:

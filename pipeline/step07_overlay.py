@@ -35,13 +35,13 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
     # ponytail: Find subtitle blur region to align the new ASS subtitle on top of it
     sub_region = next((r for r in (regions or []) if r.get("label") == "subtitle"), None)
 
-    # Build ASS subtitle file inside output_dir passing original dimensions
-    ass_path = _build_ass(segments, duration, target_lang, output_dir, job_id, ci, sub_region, orig_w, orig_h)
-
-    # Build single master TTS audio track via pydub
-    # Tránh lỗi FFmpeg exit 4294967274 khi số lượng input streams/filters vượt giới hạn (>100 files)
+    # Build single master TTS audio track via pydub kèm đồng bộ mốc thời gian thực tế cho ASS subtitle
     tts_master_path = os.path.join(output_dir, f"{job_id}_ch{ci:04d}_tts_mix.wav")
-    has_tts = _build_chunk_tts_track(segments, duration, tts_master_path) is not None
+    tts_res, synced_segments = _build_chunk_tts_track(segments, duration, tts_master_path)
+    has_tts = tts_res is not None
+
+    # Build ASS subtitle file inside output_dir passing original dimensions
+    ass_path = _build_ass(synced_segments, duration, target_lang, output_dir, job_id, ci, sub_region, orig_w, orig_h)
 
     # 1. Inputs — cắt trực tiếp tại đây: -ss/-t kèm re-encode cho seek chính xác,
     # bỏ được một lần chạy ffmpeg extract mỗi chunk.
@@ -258,16 +258,17 @@ MAX_TEMPO = 1.35
 """Trần nén tốc độ TTS — vượt mức này giọng bắt đầu méo."""
 
 
-def _build_chunk_tts_track(segments: list[dict], duration: float, output_path: str) -> str | None:
+def _build_chunk_tts_track(segments: list[dict], duration: float, output_path: str) -> tuple[str | None, list[dict]]:
     """Mix all TTS segments of a chunk into a single stereo WAV file with Ripple Pacing Shift.
     
-    Thuật toán Ripple Pacing Shift:
+    Đồng bộ 100% timeline giữa TTS audio và ASS subtitle:
+    - Trả về (output_path, synced_segments) với mốc start/end thực tế khớp chuẩn xác thời điểm phát tiếng.
     - Tránh triệt để việc 2 câu thoại TTS đè giọng lên nhau khi câu trước đọc dài hơn slot.
     - Đẩy nhẹ điểm bắt đầu câu sau nếu câu trước chưa dứt (có gap 40ms).
     - Tự động co giãn tốc độ thông minh theo khoảng trống thực tế đến câu kế tiếp.
     """
     if not segments:
-        return None
+        return None, []
     try:
         from pydub import AudioSegment
         from pydub.effects import speedup
@@ -279,16 +280,19 @@ def _build_chunk_tts_track(segments: list[dict], duration: float, output_path: s
 
         # Thu thập các segment hợp lệ kèm index
         valid_entries = []
-        for seg in segments:
+        for idx_orig, seg in enumerate(segments):
             p = seg.get("tts_path")
-            if p and os.path.exists(p):
-                s = max(0.0, float(seg.get("start", 0)))
-                valid_entries.append((s, seg, p))
+            s = max(0.0, float(seg.get("start", 0)))
+            valid_entries.append((s, idx_orig, seg, p))
         valid_entries.sort(key=lambda x: x[0])
 
         cursor_ms = 0
+        synced_map = {}
 
-        for idx, (s, seg, p) in enumerate(valid_entries):
+        for idx, (s, idx_orig, seg, p) in enumerate(valid_entries):
+            if not p or not os.path.exists(p):
+                synced_map[idx_orig] = dict(seg)
+                continue
             try:
                 audio = AudioSegment.from_file(p).set_frame_rate(44100).set_channels(2)
                 # Boost nhẹ âm lượng TTS (+3.5 dB)
@@ -319,17 +323,31 @@ def _build_chunk_tts_track(segments: list[dict], duration: float, output_path: s
 
                 # Overlay vào master track
                 master = master.overlay(audio, position=actual_start_ms)
-                cursor_ms = actual_start_ms + len(audio)
+                final_audio_len_ms = len(audio)
+                cursor_ms = actual_start_ms + final_audio_len_ms
                 has_audio = True
+
+                # Cập nhật mốc thời gian thực tế khớp chuẩn từng mili-giây cho phụ đề ASS
+                synced_seg = dict(seg)
+                real_start_sec = round(actual_start_ms / 1000.0, 3)
+                real_end_sec = round(cursor_ms / 1000.0, 3)
+                synced_seg["start"] = real_start_sec
+                synced_seg["end"] = real_end_sec
+                synced_seg["t_start"] = real_start_sec
+                synced_seg["t_end"] = real_end_sec
+                synced_map[idx_orig] = synced_seg
             except Exception as exc:
                 logger.warning("overlay: error placing TTS seg %s: %s", p, exc)
+                synced_map[idx_orig] = dict(seg)
 
+        synced_result = [synced_map.get(i, segments[i]) for i in range(len(segments))]
         if has_audio:
             master[:int(duration * 1000)].export(output_path, format="wav")
-            return output_path
+            return output_path, synced_result
+        return None, synced_result
     except Exception as exc:
         logger.warning("overlay: build chunk TTS track failed: %s", exc)
-    return None
+        return None, segments
 
 
 async def _tts_duration(path: str) -> float:

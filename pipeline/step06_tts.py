@@ -66,13 +66,37 @@ def _normalize_voice(voice: str) -> str:
     return v_norm
 
 
-async def run_tts(text: str, voice: str = "", max_retries: int = 2) -> str:
-    """Generate TTS từ voice được chọn.
-    Chỉ sử dụng:
-    1. TikTok TTS local (core.tiktok) khi có session.
-    2. TikTok TTS từ Remote Server cấu hình sẵn.
-    Thực hiện retry max_retries (mặc định 2) lần cho mỗi nguồn.
-    """
+async def _apply_tts_speed(audio_path: str, speed: float = 1.05) -> str:
+    """Tăng tốc âm thanh TTS (mặc định 1.05x) để giọng đọc gọn gàng, vừa vặn timeline."""
+    if not audio_path or not os.path.exists(audio_path) or speed <= 0 or abs(speed - 1.0) < 0.01:
+        return audio_path
+    ffmpeg = settings.get("ffmpeg_path", "ffmpeg")
+    tmp_out = f"{audio_path}_speed_{speed}.mp3"
+    cmd = [ffmpeg, "-y", "-i", audio_path, "-filter:a", f"atempo={speed:.2f}", tmp_out]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        await proc.communicate()
+        if proc.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 200:
+            try:
+                os.replace(tmp_out, audio_path)
+                return audio_path
+            except Exception:
+                return tmp_out
+    except Exception as exc:
+        logger.warning("TTS atempo=%.2f failed: %s", speed, exc)
+    finally:
+        if os.path.exists(tmp_out) and tmp_out != audio_path:
+            try:
+                os.remove(tmp_out)
+            except OSError:
+                pass
+    return audio_path
+
+
+async def run_tts(text: str, voice: str = "", max_retries: int = 2, speed: float = 1.05) -> str:
+    """Generate TTS từ voice được chọn kèm tốc độ mặc định 1.05x."""
     text = _clean_for_tts(text)
     if not text:
         raise ValueError("TTS: text is empty")
@@ -90,7 +114,7 @@ async def run_tts(text: str, voice: str = "", max_retries: int = 2) -> str:
                 try:
                     res = await tiktok.generate(text, v_norm, out.name)
                     if res and os.path.exists(res) and os.path.getsize(res) > 200:
-                        return res
+                        return await _apply_tts_speed(res, speed)
                 except Exception as exc:
                     last_error = exc
                     logger.warning("Local TikTok TTS attempt %d/%d failed: %s", attempt + 1, max_retries, exc)
@@ -119,7 +143,9 @@ async def run_tts(text: str, voice: str = "", max_retries: int = 2) -> str:
         if not url:
             continue
         try:
-            return await _tts_from_server(text, v_norm, url, api_key, max_retries=max_retries)
+            res = await _tts_from_server(text, v_norm, url, api_key, max_retries=max_retries)
+            if res and os.path.exists(res):
+                return await _apply_tts_speed(res, speed)
         except Exception as exc:
             last_error = exc
             logger.warning("TTS server %d (%s) failed: %s", idx + 1, url, exc)

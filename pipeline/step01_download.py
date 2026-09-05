@@ -48,8 +48,8 @@ async def download_video(url: str, output_dir: str, job_id: str) -> dict[str, st
     else:
         res = await _download_ytdlp(url, output_dir, job_id)
 
-    # Tự động giảm tốc 0.8x ngầm để kéo dãn timeline cho STT và TTS không bị đè/lấn giọng
-    res["video_path"] = await _apply_speed(res["video_path"], 0.8)
+    # Tự động giảm tốc 0.9x ngầm sau download để kéo dãn timeline cho STT và TTS không bị đè/lấn giọng
+    res["video_path"] = await _apply_speed(res["video_path"], 0.9)
     return res
 
 
