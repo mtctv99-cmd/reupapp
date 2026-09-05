@@ -71,28 +71,38 @@ async def _run(cmd: list[str], timeout: int = 7200) -> str:
 
 async def has_audio_stream(path: str) -> bool:
     """Check if video file contains an audio stream."""
-    out = await _run([
-        settings.get("ffprobe_path", "ffprobe"),
-        "-v", "quiet", "-select_streams", "a",
-        "-show_entries", "stream=codec_type",
-        "-of", "csv=p=0", path,
-    ])
-    return bool(out.strip())
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        out = await _run([
+            settings.get("ffprobe_path", "ffprobe"),
+            "-v", "error", "-select_streams", "a",
+            "-show_entries", "stream=codec_type",
+            "-of", "csv=p=0", path,
+        ])
+        return bool(out.strip())
+    except Exception as exc:
+        logger.warning("has_audio_stream check failed for %s: %s", path, exc)
+        return False
 
 
 async def get_duration(path: str) -> float:
+    if not path or not os.path.exists(path):
+        return 0.0
     out = await _run([
         settings.get("ffprobe_path", "ffprobe"),
-        "-v", "quiet", "-show_entries", "format=duration",
+        "-v", "error", "-show_entries", "format=duration",
         "-of", "json", path,
     ])
     return float(json.loads(out).get("format", {}).get("duration", 0))
 
 
 async def get_dimensions(path: str) -> tuple[int, int]:
+    if not path or not os.path.exists(path):
+        return 0, 0
     out = await _run([
         settings.get("ffprobe_path", "ffprobe"),
-        "-v", "quiet", "-show_entries", "stream=width,height",
+        "-v", "error", "-show_entries", "stream=width,height",
         "-of", "json", path,
     ])
     streams = json.loads(out).get("streams", [])

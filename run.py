@@ -11,26 +11,30 @@ import time
 if sys.platform == 'win32':
     import asyncio  # Nạp asyncio trước để windows_utils thừa kế subprocess.Popen gốc
     import subprocess
-    _orig_popen = subprocess.Popen
-    class _SilentPopen(_orig_popen):
-        def __init__(self, *args, **kwargs):
-            if 'creationflags' not in kwargs:
-                kwargs['creationflags'] = 0x08000000  # CREATE_NO_WINDOW
-            else:
-                kwargs['creationflags'] |= 0x08000000
-            super().__init__(*args, **kwargs)
-    subprocess.Popen = _SilentPopen
+    if not getattr(subprocess, '_SEVER_SILENT_PATCHED', False):
+        _orig_popen = subprocess.Popen
+        class _SilentPopen(_orig_popen):
+            def __init__(self, *args, **kwargs):
+                if 'creationflags' not in kwargs:
+                    kwargs['creationflags'] = 0x08000000  # CREATE_NO_WINDOW
+                else:
+                    kwargs['creationflags'] |= 0x08000000
+                super().__init__(*args, **kwargs)
+        subprocess.Popen = _SilentPopen
+        subprocess._SEVER_SILENT_PATCHED = True
 
     try:
         from asyncio import windows_utils
-        _orig_win_popen_init = windows_utils.Popen.__init__
-        def _silent_win_popen_init(self, *args, **kwargs):
-            if 'creationflags' not in kwargs:
-                kwargs['creationflags'] = 0x08000000  # CREATE_NO_WINDOW
-            else:
-                kwargs['creationflags'] |= 0x08000000
-            _orig_win_popen_init(self, *args, **kwargs)
-        windows_utils.Popen.__init__ = _silent_win_popen_init
+        if not getattr(windows_utils, '_SEVER_SILENT_PATCHED', False):
+            _orig_win_popen_init = windows_utils.Popen.__init__
+            def _silent_win_popen_init(self, *args, **kwargs):
+                if 'creationflags' not in kwargs:
+                    kwargs['creationflags'] = 0x08000000  # CREATE_NO_WINDOW
+                else:
+                    kwargs['creationflags'] |= 0x08000000
+                _orig_win_popen_init(self, *args, **kwargs)
+            windows_utils.Popen.__init__ = _silent_win_popen_init
+            windows_utils._SEVER_SILENT_PATCHED = True
     except Exception:
         pass
 
