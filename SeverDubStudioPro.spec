@@ -6,13 +6,14 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 rapidocr_dir = os.path.dirname(rapidocr_onnxruntime.__file__)
 
 # ── Bundle STT models (Bản Lite: Tự tải về %APPDATA%/SeverDesktop/models_cache; Bản Full: bundle kèm) ──
-_BUILD_LITE = os.environ.get("BUILD_LITE", "1") == "1"
+_BUILD_LITE = os.environ.get("BUILD_LITE", "0") == "1"
 _models_datas = []
 
 if not _BUILD_LITE:
     _candidate_dirs = [
-        os.path.join(os.path.expanduser('~'), '.cache', 'modelscope', 'hub', 'models'),
+        os.path.join(os.environ.get('APPDATA', ''), 'SeverDesktop', 'models_cache', 'models'),
         os.path.join(os.path.expanduser('~'), '.cache', 'modelscope', 'models'),
+        os.path.join(os.path.expanduser('~'), '.cache', 'modelscope', 'hub', 'models'),
         os.path.join(os.path.expanduser('~'), '.cache', 'modelscope', 'hub'),
     ]
     for _base in _candidate_dirs:
@@ -44,7 +45,7 @@ if os.path.exists(os.path.join(rapidocr_dir, 'models')):
     _rapidocr_datas.append((os.path.join(rapidocr_dir, 'models'), 'rapidocr_onnxruntime/models'))
 
 # ── Binaries Data (Tùy chọn: nếu NO_BIN=1 thì app tự tải về %APPDATA%/SeverDesktop/bin) ──
-_NO_BIN = os.environ.get("NO_BIN", "1") == "1"
+_NO_BIN = os.environ.get("NO_BIN", "0") == "1"
 _bin_datas = []
 if not _NO_BIN:
     for _b in ('bin/ffmpeg.exe', 'bin/ffprobe.exe', 'bin/yt-dlp.exe', 'bin/BBDown.exe'):
