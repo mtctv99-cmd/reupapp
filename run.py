@@ -22,6 +22,19 @@ if sys.platform == 'win32':
     subprocess.Popen = _SilentPopen
 
     try:
+        from asyncio import windows_utils
+        _orig_win_popen_init = windows_utils.Popen.__init__
+        def _silent_win_popen_init(self, *args, **kwargs):
+            if 'creationflags' not in kwargs:
+                kwargs['creationflags'] = 0x08000000  # CREATE_NO_WINDOW
+            else:
+                kwargs['creationflags'] |= 0x08000000
+            _orig_win_popen_init(self, *args, **kwargs)
+        windows_utils.Popen.__init__ = _silent_win_popen_init
+    except Exception:
+        pass
+
+    try:
         from asyncio.proactor_events import _ProactorBasePipeTransport
         _orig_call_connection_lost = _ProactorBasePipeTransport._call_connection_lost
         def _call_connection_lost_patched(self, exc):

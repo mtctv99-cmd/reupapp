@@ -15,6 +15,36 @@ import os
 import sys
 from pathlib import Path
 
+# ── Global silence for Windows subprocesses (Chống triệt để cửa sổ đen nhấp nháy trên Windows) ──
+if sys.platform == "win32":
+    import subprocess
+    _orig_popen = subprocess.Popen
+
+    class _SilentPopen(_orig_popen):
+        def __init__(self, *args, **kwargs):
+            if "creationflags" not in kwargs:
+                kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+            else:
+                kwargs["creationflags"] |= 0x08000000
+            super().__init__(*args, **kwargs)
+
+    subprocess.Popen = _SilentPopen
+
+    try:
+        from asyncio import windows_utils
+        _orig_win_popen_init = windows_utils.Popen.__init__
+
+        def _silent_win_popen_init(self, *args, **kwargs):
+            if "creationflags" not in kwargs:
+                kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+            else:
+                kwargs["creationflags"] |= 0x08000000
+            _orig_win_popen_init(self, *args, **kwargs)
+
+        windows_utils.Popen.__init__ = _silent_win_popen_init
+    except Exception:
+        pass
+
 _IS_FROZEN = bool(getattr(sys, "frozen", False))
 
 if _IS_FROZEN:
