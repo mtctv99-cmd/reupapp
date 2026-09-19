@@ -96,9 +96,9 @@
             <div class="config-card">
               <div class="config-card-header"><span class="config-icon">🗣️</span><span class="config-card-title">Giọng Thuyết Minh</span></div>
               <select id="select-voice" class="custom-select">
-                <option value="BV074_streaming" selected>Nữ TikTok (BV074_streaming)</option>
+                <option value="ngoc_huyen" selected>⚡ Ngọc Huyền (Offline Siêu Tốc)</option>
+                <option value="BV074_streaming">Nữ TikTok (BV074_streaming)</option>
                 <option value="BV001_streaming">Nam TikTok (BV001_streaming)</option>
-                <option value="ngoc_huyen">Ngọc Huyền (OmniVoice)</option>
               </select>
             </div>
 
@@ -208,7 +208,10 @@
               <div id="bili-status-text" class="bili-status-text">Đang kiểm tra...</div>
               <div id="bili-status-detail" class="bili-status-detail"></div>
             </div>
-            <button id="btn-bili-logout" class="btn-danger btn-sm hidden">Đăng xuất</button>
+            <div style="display:flex;gap:6px;align-items:center">
+              <button id="btn-bili-refresh-session" class="btn-secondary btn-sm" title="Kiểm tra & làm mới session">🔄 Làm mới</button>
+              <button id="btn-bili-logout" class="btn-danger btn-sm hidden">Đăng xuất</button>
+            </div>
           </div>
 
           <!-- QR Code Login -->
@@ -337,7 +340,7 @@
         <div style="background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
           <div class="flex-between" style="margin-bottom: 4px;">
             <span style="font-weight: 600; font-size: 14px;" id="update-modal-version">Phiên bản mới</span>
-            <span style="font-size: 12px; color: #888;">Hiện tại: <span id="update-current-version">v0.2.0</span></span>
+            <span style="font-size: 12px; color: #888;">Hiện tại: <span id="update-current-version">v0.2.1</span></span>
           </div>
           <div id="update-modal-changelog" style="font-size: 12px; color: #ccc; max-height: 120px; overflow-y: auto; white-space: pre-wrap; margin-top: 6px;"></div>
         </div>

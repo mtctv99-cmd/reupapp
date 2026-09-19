@@ -7,7 +7,7 @@
   "remove_sub": true,
   "video_speed": 1.0,
   "original_volume": 0,
-  "aspect_ratio": "3:4",
+  "aspect_ratio": "9:16_720p",
   "bg_style": "blur",
   "bg_color": "black",
   "logo_path": "",
@@ -59,7 +59,8 @@
     "api_key": "omni-secret-key-123",
     "voices": [
       "ngoc_huyen",
-      "ngoc_huyen"
+      "BV074_streaming",
+      "BV001_streaming"
     ]
   },
   "tts_servers": [

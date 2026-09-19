@@ -319,7 +319,7 @@ async function checkBilibiliStatus() {
   if (d.logged_in) {
     icon.textContent = "✅";
     text.textContent = "Đã đăng nhập Bilibili";
-    detail.textContent = d.username || "";
+    detail.textContent = d.username || d.account_name || "";
     text.style.color = "var(--ok)";
     logoutBtn.classList.remove("hidden");
   } else {
@@ -387,7 +387,7 @@ async function createBiliQR() {
     });
     if (!pollRes || !pollRes.data) return;
     const st = pollRes.data.status;
-    if (st === "scan_success") {
+    if (st === "scan_success" || st === 0 || pollRes.data.logged_in) {
       clearInterval(biliPollTimer);
       clearInterval(countdownInterval);
       qrCountdown.textContent = "✅ Đăng nhập thành công!";
@@ -401,7 +401,7 @@ async function createBiliQR() {
         qrCountdown.style.color = "";
       }, 2000);
       checkBilibiliStatus();
-    } else if (st === "expired") {
+    } else if (st === "expired" || st === 86038) {
       clearInterval(biliPollTimer);
       clearInterval(countdownInterval);
       qrCountdown.textContent = "QR đã hết hạn";
@@ -409,6 +409,30 @@ async function createBiliQR() {
       qrPlaceholder.classList.remove("hidden");
     }
   }, 2000);
+}
+
+async function refreshBiliSession() {
+  const btn = document.getElementById("btn-bili-refresh-session");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Đang kiểm tra...";
+  }
+  try {
+    const res = await apiFetch("/bilibili/refresh", { method: "POST", body: JSON.stringify({}) });
+    if (res && (res.status === "ok" || res.success !== false)) {
+      showToast(res.message || "Session Bilibili hợp lệ & đã đồng bộ!", "success");
+    } else {
+      showToast(res?.message || "Session Bilibili hết hạn — cần đăng nhập lại", "warn");
+    }
+  } catch (e) {
+    showToast("Không thể kiểm tra session Bilibili", "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "🔄 Làm mới";
+    }
+    checkBilibiliStatus();
+  }
 }
 
 async function saveBiliCookie() {
@@ -419,12 +443,12 @@ async function saveBiliCookie() {
     method: "POST",
     body: JSON.stringify({ cookie }),
   });
-  if (res && res.status === "ok") {
-    showToast("Đã lưu cookie!", "success");
+  if (res && (res.status === "ok" || res.data?.account_id)) {
+    showToast(res.message || "Đã lưu cookie Bilibili thành công!", "success");
     inp.value = "";
     checkBilibiliStatus();
   } else {
-    showToast(res?.error || "Cookie không hợp lệ", "error");
+    showToast(res?.error || res?.detail || "Cookie không hợp lệ", "error");
   }
 }
 
@@ -923,6 +947,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Bilibili QR + Cookie
   document.getElementById("btn-bili-create-qr")?.addEventListener("click", createBiliQR);
   document.getElementById("btn-bili-save-cookie")?.addEventListener("click", saveBiliCookie);
+  document.getElementById("btn-bili-refresh-session")?.addEventListener("click", refreshBiliSession);
   document.getElementById("btn-bili-logout")?.addEventListener("click", logoutBili);
 
   // TikTok TTS accounts

@@ -8,14 +8,100 @@ import logging
 import os
 import random
 import re
+import sys
 import tempfile
+import threading
 import time
+import wave
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
 from core.config import settings
 
 logger = logging.getLogger(__name__)
+
+_PIPER_VOICES: dict[str, Any] = {}
+_PIPER_LOCK = threading.Lock()
+
+
+def resolve_piper_model(voice_name: str = "ngoc_huyen") -> tuple[Path, Path] | None:
+    """Tìm file .onnx và .onnx.json của model Piper."""
+    candidate_bases: list[Path] = []
+
+    # 1. Thư mục APPDATA (%APPDATA%/SeverDesktop/models/piper)
+    try:
+        from core.config import app_dir
+        candidate_bases.append(app_dir() / "models" / "piper")
+    except Exception:
+        pass
+
+    # 2. Frozen PyInstaller directory
+    if getattr(sys, "frozen", False):
+        meipass = Path(getattr(sys, "_MEIPASS", ""))
+        candidate_bases.append(meipass / "models" / "piper")
+        candidate_bases.append(meipass / "_internal" / "models" / "piper")
+        exe_dir = Path(sys.executable).parent
+        candidate_bases.append(exe_dir / "models" / "piper")
+        candidate_bases.append(exe_dir / "_internal" / "models" / "piper")
+
+    # 3. Thư mục mã nguồn dự án
+    proj_root = Path(__file__).parent.parent
+    candidate_bases.append(proj_root / "models" / "piper")
+
+    for base in candidate_bases:
+        model_file = base / voice_name / f"{voice_name}.onnx"
+        config_file = base / voice_name / f"{voice_name}.onnx.json"
+        if model_file.is_file() and config_file.is_file():
+            return (model_file, config_file)
+
+    return None
+
+
+def get_piper_voice(voice_name: str = "ngoc_huyen"):
+    """Tải hoặc lấy đối tượng PiperVoice đã cache trong bộ nhớ."""
+    with _PIPER_LOCK:
+        if voice_name in _PIPER_VOICES:
+            return _PIPER_VOICES[voice_name]
+        paths = resolve_piper_model(voice_name)
+        if not paths:
+            return None
+        model_path, config_path = paths
+        try:
+            from piper import PiperVoice
+            voice = PiperVoice.load(str(model_path), config_path=str(config_path), use_cuda=False)
+            _PIPER_VOICES[voice_name] = voice
+            logger.info("Loaded local Piper TTS voice '%s' from %s", voice_name, model_path)
+            return voice
+        except Exception as exc:
+            logger.error("Failed to load local Piper voice '%s': %s", voice_name, exc)
+            return None
+
+
+def _synthesize_piper_sync(voice_obj, text: str, output_wav: str) -> None:
+    with wave.open(output_wav, "wb") as wav_file:
+        voice_obj.synthesize_wav(text, wav_file, set_wav_format=True)
+
+
+async def synthesize_piper_local(text: str, voice_name: str = "ngoc_huyen") -> str | None:
+    """Tạo audio TTS qua model Piper chạy trực tiếp trên máy (không cần internet hay server)."""
+    voice_obj = get_piper_voice(voice_name)
+    if not voice_obj:
+        return None
+    fd, tmp_wav = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    try:
+        await asyncio.to_thread(_synthesize_piper_sync, voice_obj, text, tmp_wav)
+        if os.path.exists(tmp_wav) and os.path.getsize(tmp_wav) > 200:
+            return tmp_wav
+    except Exception as exc:
+        logger.error("Local Piper synthesis error: %s", exc)
+        if os.path.exists(tmp_wav):
+            try:
+                os.remove(tmp_wav)
+            except OSError:
+                pass
+    return None
 
 # Global Cooldown Lock đã được gỡ bỏ theo yêu cầu
 async def _apply_cooldown(min_gap_sec: float = 0.0):
@@ -59,10 +145,14 @@ def _clean_for_tts(text: str) -> str:
 
 def _normalize_voice(voice: str) -> str:
     v_norm = (voice or "").strip()
-    if v_norm.lower() in ("bv74_steaming", "bv074_streaming", "tiktok_female", "female", ""):
+    if v_norm.lower() in ("ngoc_huyen", "ngochuyen", "huyen", "piper", "piper_ngoc_huyen"):
+        return "ngoc_huyen"
+    if v_norm.lower() in ("bv74_steaming", "bv074_streaming", "tiktok_female", "female"):
         return "BV074_streaming"
     if v_norm.lower() in ("bv001_streaming", "tiktok_male", "male"):
         return "BV001_streaming"
+    if not v_norm:
+        return "ngoc_huyen" if resolve_piper_model("ngoc_huyen") else "BV074_streaming"
     return v_norm
 
 
@@ -71,7 +161,8 @@ async def _apply_tts_speed(audio_path: str, speed: float = 1.05) -> str:
     if not audio_path or not os.path.exists(audio_path) or speed <= 0 or abs(speed - 1.0) < 0.01:
         return audio_path
     ffmpeg = settings.get("ffmpeg_path", "ffmpeg")
-    tmp_out = f"{audio_path}_speed_{speed}.mp3"
+    ext = os.path.splitext(audio_path)[1] or ".wav"
+    tmp_out = f"{audio_path}_speed_{speed}{ext}"
     cmd = [ffmpeg, "-y", "-i", audio_path, "-filter:a", f"atempo={speed:.2f}", tmp_out]
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -101,10 +192,30 @@ async def run_tts(text: str, voice: str = "", max_retries: int = 2, speed: float
     if not text:
         raise ValueError("TTS: text is empty")
 
+    if abs(speed - 1.05) < 0.001:
+        try:
+            speed = float(settings.get("tts_speed", 1.05))
+        except (TypeError, ValueError):
+            speed = 1.05
+
     v_norm = _normalize_voice(voice)
     last_error: Exception | None = None
 
-    # 1. Thử TikTok TTS Local native nếu có session
+    # 1. Thử Piper TTS Local trực tiếp (ưu tiên ngoc_huyen hoặc model local)
+    if v_norm == "ngoc_huyen" or resolve_piper_model(v_norm):
+        for attempt in range(max_retries):
+            try:
+                res = await synthesize_piper_local(text, v_norm)
+                if res and os.path.exists(res) and os.path.getsize(res) > 200:
+                    return await _apply_tts_speed(res, speed)
+            except Exception as exc:
+                last_error = exc
+                logger.warning("Local Piper TTS attempt %d/%d failed: %s", attempt + 1, max_retries, exc)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(0.1)
+        logger.warning("Local Piper TTS failed for '%s', falling back...", v_norm)
+
+    # 2. Thử TikTok TTS Local native nếu có session
     if v_norm in ("BV074_streaming", "BV001_streaming"):
         from core import tiktok
         if tiktok.has_session():

@@ -190,8 +190,8 @@ _REFINE_SPLIT_MAX = 3.5
 # Split long — trần tối đa cho câu thoại TTS dài (tránh câu đọc lê thê quá 4.5s)
 _SPLIT_LONG_THRESHOLD = 4.5
 
-# Token / Silence splitting — ngắt câu khi khoảng lặng âm tiết >= 350ms
-_MIN_SILENCE_TOKEN_GAP_MS = 350.0
+# Token / Silence splitting — ngắt câu khi khoảng lặng âm tiết >= 300ms
+_MIN_SILENCE_TOKEN_GAP_MS = 300.0
 
 # Merge fragmented — chỉ gom mảnh khi câu trước KHÔNG có dấu kết thúc câu (gap <= 450ms, max 3.5s / 28 ký tự)
 _MERGE_MAX_GAP_MS = 450
@@ -800,14 +800,15 @@ async def stt_funasr(audio_path: str, source_lang: str = "zh", **kwargs) -> list
                                  "start_ms": 0, "end_ms": 0, "duration": 0, "duration_ms": 0,
                                  "t_start": 0, "t_end": 0, "token_timestamps": []})
 
-    # Apply all refinement steps
+    # Apply natural speech segmentation steps (chuẩn pipeline sever_v2)
     segments = split_by_silence_tokens(segments)
     segments = refine_segments(segments)
     segments = split_long_segments(segments)
-    segments = clean_segments_with_audio(segments, audio_path)
+    if os.path.exists(audio_path):
+        segments = clean_segments_with_audio(segments, audio_path)
+    segments = filter_isolated_noise_segments(segments)
     segments.sort(key=lambda s: s.get("start", 0))
     segments = merge_fragmented_segments(segments)
-    segments = filter_isolated_noise_segments(segments)
     segments = fill_segment_gaps(segments, audio_path)
     return segments
 

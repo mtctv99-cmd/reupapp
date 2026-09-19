@@ -1,6 +1,6 @@
 ; Inno Setup Script for Sever Dub Studio Pro (Ultra-Lite)
 #define MyAppName "Sever Dub Studio Pro"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.2.1"
 #define MyAppPublisher "Sever Studio"
 #define MyAppURL "https://github.com/mtctv99-cmd/sever-studio-releases"
 #define MyAppExeName "SeverDubStudioPro.exe"

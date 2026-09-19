@@ -52,6 +52,13 @@ if not _NO_BIN:
         if os.path.exists(_b):
             _bin_datas.append((_b, 'bin'))
 
+# ── Piper TTS Data & Local Voice Models ──
+_piper_datas = collect_data_files('piper')
+if os.path.exists('models/piper'):
+    _piper_datas.append(('models/piper', 'models/piper'))
+
+_piper_submodules = [s for s in collect_submodules('piper') if not s.startswith('piper.train')]
+
 a = Analysis(
     ['run.py'],
     pathex=[],
@@ -59,7 +66,7 @@ a = Analysis(
     datas=[
         ('src', 'src'),
         ('settings.json', '.'),
-    ] + _bin_datas + _playwright_datas + _rapidocr_datas + _models_datas + collect_data_files('funasr') + collect_data_files('modelscope'),
+    ] + _bin_datas + _playwright_datas + _rapidocr_datas + _models_datas + _piper_datas + collect_data_files('funasr') + collect_data_files('modelscope'),
     hiddenimports=[
         # uvicorn
         'uvicorn.logging', 'uvicorn.loops.auto', 'uvicorn.protocols.http.auto',
@@ -73,7 +80,7 @@ a = Analysis(
         # Audio processing
         'pydub', 'pydub.silence',
         # TTS
-        'gtts', 'gtts.tts',
+        'gtts', 'gtts.tts', 'piper', 'piper.voice', 'piper.espeakbridge',
         # TikTok TTS login
         'playwright', 'playwright.sync_api', 'playwright.driver',
         'playwright._impl', 'playwright.async_api',
@@ -83,7 +90,7 @@ a = Analysis(
         'Crypto', 'Cryptodome', 'websockets',
         # SQLite
         'sqlite3',
-    ] + collect_submodules('funasr') + collect_submodules('modelscope'),
+    ] + _piper_submodules + collect_submodules('funasr') + collect_submodules('modelscope'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['hooks/fix_frozen_funasr.py'],

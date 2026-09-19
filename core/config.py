@@ -130,25 +130,25 @@ def _defaults() -> dict[str, Any]:
         "translate_provider": {
             "url": "https://gemini.maika.sbs/v1",
             "api_key": "none",
-            "models": ["gemini-flash-lite", "gemini-3.5-flash-lite"]
+            "models": ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite"]
         },
         "translate_tiers": [
             {
+                "provider": "openai",
+                "url": "https://gemini.maika.sbs/v1",
+                "model": "gemini-3.8-flash",
+                "label": "Tier 1: gemini-3.8-flash (provider)"
+            },
+            {
+                "provider": "openai",
+                "url": "https://gemini.maika.sbs/v1",
+                "model": "gemini-3.7-flash",
+                "label": "Tier 2: gemini-3.7-flash (provider)"
+            },
+            {
                 "provider": "gemini_stealth",
-                "model": "gemini-flash-lite",
-                "label": "Tier 1: gemini-flash-lite (local, free)"
-            },
-            {
-                "provider": "openai",
-                "url": "https://gemini.maika.sbs/v1",
-                "model": "gemini-flash-lite",
-                "label": "Tier 2: gemini-flash-lite (provider)"
-            },
-            {
-                "provider": "openai",
-                "url": "https://gemini.maika.sbs/v1",
-                "model": "gemini-3.5-flash-lite",
-                "label": "Tier 3: gemini-3.5-flash-lite (provider)"
+                "model": "gemini-3.8-flash",
+                "label": "Tier 3: gemini-3.8-flash (local, free)"
             },
             {
                 "provider": "google",
@@ -159,7 +159,7 @@ def _defaults() -> dict[str, Any]:
         "tts_provider": {
             "url": "https://tts.maika.sbs",
             "api_key": "omni-secret-key-123",
-            "voices": ["ngoc_huyen", "ngoc_huyen"]
+            "voices": ["ngoc_huyen", "BV074_streaming", "BV001_streaming"]
         },
         "tts_servers": [
             {

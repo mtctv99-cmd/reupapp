@@ -41,7 +41,7 @@ class WatermarkVisionService:
         max_regions: int = 6,
         subtitle_width_ratio: float = 0.85,
         subtitle_min_width_ratio: float = 0.15,
-        subtitle_min_y_ratio: float = 0.70,
+        subtitle_min_y_ratio: float = 0.55,
     ) -> None:
         self._ocr = ocr
         self._sample_count = max(3, sample_count)
@@ -279,6 +279,14 @@ class WatermarkVisionService:
         if w < 2 or h < 2:
             return None
 
+        # sever_v2: Giới hạn chiều cao tối đa của box blur <= 16% frame để tránh che mờ nửa màn hình
+        max_allowed_h = int(height * 0.16)
+        if h > max_allowed_h:
+            y_mid = y0 + h / 2.0
+            h = max_allowed_h
+            y0 = max(0, int(round(y_mid - h / 2.0)))
+            y1 = y0 + h
+
         yc = y0 + h / 2.0
         is_subtitle = (
             yc >= height * self._subtitle_min_y_ratio
@@ -314,8 +322,13 @@ class WatermarkVisionService:
             y_center = y + h / 2.0
 
             if label == "subtitle":
-                if y_center >= height * 0.75 and w >= width * self._subtitle_min_width_ratio:
+                if y_center >= height * self._subtitle_min_y_ratio and w >= width * self._subtitle_min_width_ratio:
                     subtitles.append(region)
+                continue
+
+            # sever_v2 Spatial Guard: Logo/watermark cố định phải nằm sát mép biên (top <= 25% hoặc bottom >= 80%)
+            # Vùng giữa màn hình (0.25 < y_center < 0.80) bỏ qua để tránh mờ nhầm chủ thể video
+            if not (y_center <= height * 0.25 or y_center >= height * 0.80):
                 continue
 
             is_top = y <= height * 0.22 and h <= height * 0.18 and w <= width * 0.35

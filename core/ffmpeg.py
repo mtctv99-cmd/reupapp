@@ -24,14 +24,14 @@ def get_best_video_encoder() -> list[str]:
 
     import subprocess
     candidates = [
-        ("NVIDIA NVENC", ["-c:v", "h264_nvenc", "-preset", "p4"]),
-        ("Intel QSV", ["-c:v", "h264_qsv", "-preset", "fast"]),
-        ("AMD AMF", ["-c:v", "h264_amf", "-quality", "speed"]),
+        ("NVIDIA NVENC", ["-c:v", "h264_nvenc", "-preset", "p4", "-rc:v", "vbr", "-cq", "23", "-b:v", "0", "-spatial-aq", "1", "-temporal-aq", "1"]),
+        ("Intel QSV", ["-c:v", "h264_qsv", "-preset", "veryfast", "-global_quality", "23"]),
+        ("AMD AMF", ["-c:v", "h264_amf", "-quality", "speed", "-rc", "cqp", "-qp_p", "23", "-qp_i", "23"]),
     ]
     ffmpeg_bin = settings.get("ffmpeg_path", "ffmpeg")
     for name, args in candidates:
         try:
-            cmd = [ffmpeg_bin, "-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.04"] + args + ["-f", "null", "-"]
+            cmd = [ffmpeg_bin, "-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.04", "-pix_fmt", "yuv420p"] + args + ["-f", "null", "-"]
             res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2, creationflags=_CREATION_FLAGS)
             if res.returncode == 0:
                 logger.info("Auto-detected GPU hardware encoder: %s (%s)", name, args[1])
@@ -40,8 +40,8 @@ def get_best_video_encoder() -> list[str]:
         except Exception:
             pass
 
-    logger.info("Using standard CPU encoder: libx264 (preset fast)")
-    _BEST_ENCODER = ["-c:v", "libx264", "-preset", "fast"]
+    logger.info("Using standard CPU encoder: libx264 (preset veryfast, crf 23)")
+    _BEST_ENCODER = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-tune", "fastdecode", "-threads", "0"]
     return list(_BEST_ENCODER)
 
 
@@ -196,7 +196,7 @@ async def blur_region(input_path: str, output_path: str, regions: list[dict[str,
 
 
 async def concat_files(file_list: list[str], output_path: str) -> None:
-    """Concat video chunks via concat demuxer."""
+    """Concat video chunks via concat demuxer với fallback re-encode chuẩn sever_v2."""
     import tempfile
     clean_paths = [os.path.abspath(p).replace("\\", "/").replace("'", "'\\''") for p in file_list]
     lines = "\n".join(f"file '{p}'" for p in clean_paths)
@@ -211,7 +211,33 @@ async def concat_files(file_list: list[str], output_path: str) -> None:
             "-c", "copy", output_path,
         ]
         await _run(cmd, timeout=3600)
+    except Exception as exc:
+        logger.warning("concat_files stream-copy failed (%s); falling back to re-encode", exc)
+        await _concat_reencode(file_list, output_path)
     finally:
         import os as _os
         if _os.path.exists(list_path):
             _os.unlink(list_path)
+
+
+async def _concat_reencode(file_list: list[str], output_path: str) -> None:
+    """Fallback re-encode concat khi các chunk có sai lệch codec hoặc stream copy lỗi."""
+    ffmpeg_bin = settings.get("ffmpeg_path", "ffmpeg")
+    cmd = [ffmpeg_bin, "-y"]
+    filter_parts = []
+    concat_inputs = []
+    for i, path in enumerate(file_list):
+        cmd.extend(["-i", path])
+        filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS,fps=30[v{i}]")
+        filter_parts.append(f"[{i}:a]asetpts=PTS-STARTPTS,aresample=44100[a{i}]")
+        concat_inputs.append(f"[v{i}][a{i}]")
+    filter_parts.append(f"{''.join(concat_inputs)}concat=n={len(file_list)}:v=1:a=1[v][a]")
+    cmd.extend([
+        "-filter_complex", ";".join(filter_parts),
+        "-map", "[v]", "-map", "[a]",
+        *get_best_video_encoder(),
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+        output_path,
+    ])
+    await _run(cmd, timeout=7200)

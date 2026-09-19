@@ -580,7 +580,7 @@ async def _call_tier_provider(
     provider = tier.get("provider") or tp.get("provider") or "openai"
     url = tier.get("url") or tp.get("url", "")
     api_key = tier.get("api_key") or tp.get("api_key", "")
-    model = tier.get("model") or "gemini-3.5-flash-lite"
+    model = tier.get("model") or "gemini-3.8-flash"
 
     if provider == "gemini_stealth":
         from providers.gemini_stealth import gemini_translate

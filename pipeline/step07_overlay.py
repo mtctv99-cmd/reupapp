@@ -34,14 +34,44 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
 
     # ponytail: Find subtitle blur region to align the new ASS subtitle on top of it
     sub_region = next((r for r in (regions or []) if r.get("label") == "subtitle"), None)
+    sub_blur_box = None
+    if sub_region:
+        sx, sy = int(sub_region.get("x", 0)), int(sub_region.get("y", 0))
+        sw, sh = int(sub_region.get("w", 0)), int(sub_region.get("h", 0))
+        if sw > 0 and sh > 0:
+            target_w = min(orig_w, int(sw * 1.08))
+            diff_w = target_w - sw
+            sx = max(0, sx - diff_w // 2)
+            sw = min(orig_w - sx, target_w)
+
+            pad_x, pad_y = 3, 3
+            x_crop = max(0, sx - pad_x)
+            y_crop = max(0, sy - pad_y)
+            w_crop = min(orig_w - x_crop, sw + 2 * pad_x)
+            h_crop = min(orig_h - y_crop, sh + 2 * pad_y)
+
+            x_crop = (x_crop // 2) * 2
+            y_crop = (y_crop // 2) * 2
+            w_crop = max(4, (w_crop // 2) * 2)
+            h_crop = max(4, (h_crop // 2) * 2)
+
+            sub_blur_box = {
+                "x": x_crop,
+                "y": y_crop,
+                "w": w_crop,
+                "h": h_crop,
+                "center_x": round(x_crop + w_crop / 2.0),
+                "center_y": round(y_crop + h_crop / 2.0),
+                "label": "subtitle"
+            }
 
     # Build single master TTS audio track via pydub kèm đồng bộ mốc thời gian thực tế cho ASS subtitle
     tts_master_path = os.path.join(output_dir, f"{job_id}_ch{ci:04d}_tts_mix.wav")
     tts_res, synced_segments = _build_chunk_tts_track(segments, duration, tts_master_path)
     has_tts = tts_res is not None
 
-    # Build ASS subtitle file inside output_dir passing original dimensions
-    ass_path = _build_ass(synced_segments, duration, target_lang, output_dir, job_id, ci, sub_region, orig_w, orig_h)
+    # Build ASS subtitle file inside output_dir passing original dimensions & calculated blur box
+    ass_path = _build_ass(synced_segments, duration, target_lang, output_dir, job_id, ci, sub_blur_box or sub_region, orig_w, orig_h)
 
     # 1. Inputs — cắt trực tiếp tại đây: -ss/-t kèm re-encode cho seek chính xác,
     # bỏ được một lần chạy ffmpeg extract mỗi chunk.
@@ -210,11 +240,13 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
                 # Mute hoàn toàn âm thanh gốc, chỉ lấy TTS track
                 audio_map = f"{tts_input_idx}:a"
             else:
-                # sidechaincompress tự động hạ âm nền gốc xuống êm ái khi có tiếng TTS
-                fc_parts.append(f"[{tts_input_idx}:a]asplit=2[tts_sc][tts_mix]")
-                fc_parts.append(f"[0:a]volume={orig_vol_val:.2f}[bg_vol]")
-                fc_parts.append("[bg_vol][tts_sc]sidechaincompress=threshold=0.03:ratio=3.5:attack=80:release=450[bg]")
-                fc_parts.append("[bg][tts_mix]amix=inputs=2:duration=first:normalize=0[aout]")
+                # sever_v2 (0d4fb3b & 74bbb77): Giảm cố định -20dB (10% volume) toàn bộ video
+                # Giữ nhạc nền và âm hiệu êm dịu xuyên suốt, triệt tiêu hoàn toàn tiếng thoại gốc Trung
+                # không bị giật cục hay lộ tiếng gốc đè lên giữa các khoảng ngắt câu.
+                bg_vol = max(0.01, orig_vol_val * 0.10)
+                fc_parts.append(f"[{tts_input_idx}:a]aresample=44100[tts_resamp]")
+                fc_parts.append(f"[0:a]volume={bg_vol:.3f},aresample=44100[bg_vol]")
+                fc_parts.append("[bg_vol][tts_resamp]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.98:attack=5:release=50[aout]")
                 audio_map = "[aout]"
         else:
             audio_map = f"{tts_input_idx}:a"
@@ -243,9 +275,9 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
 
     from core.ffmpeg import get_best_video_encoder
     cmd.extend(get_best_video_encoder())
-    cmd.extend(["-pix_fmt", "yuv420p"])
+    cmd.extend(["-r", "30", "-pix_fmt", "yuv420p"])
     if audio_map or src_has_audio:
-        cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+        cmd.extend(["-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2"])
     cmd.append(output)
     logger.info("overlay_chunk cmd: %s", " ".join(cmd))
     await ffmpeg_run(cmd, timeout=3600)
@@ -359,11 +391,52 @@ async def _tts_duration(path: str) -> float:
         return 0.0
 
 
+def _wrap_text_lines(text: str, max_chars: int = 34) -> str:
+    """Wrap dialogue text with \\N so ASS subtitles stay within readable 2-line width.
+
+    Balances split evenly across maximum 2 lines to avoid ragged or orphan words.
+    Cổng chuẩn từ sever_v2/sever/services/overlay_render_service.py:1462.
+    """
+    clean_text = str(text or "").strip().replace("\r", "").replace("\n", " ")
+    clean_text = clean_text.replace("{", "(").replace("}", ")")
+    if "\\N" in clean_text:
+        return clean_text
+    words = [w for w in clean_text.split(" ") if w]
+    if len(words) <= 1 or len(clean_text) <= max_chars:
+        return clean_text
+
+    total_len = len(clean_text)
+    mid_point = total_len / 2.0
+    best_split_idx = 1
+    min_diff_from_mid = float("inf")
+
+    running_len = 0
+    for i in range(len(words) - 1):
+        running_len += len(words[i]) + (1 if i > 0 else 0)
+        diff = abs(running_len - mid_point)
+        if diff < min_diff_from_mid:
+            min_diff_from_mid = diff
+            best_split_idx = i + 1
+
+    line1 = " ".join(words[:best_split_idx])
+    line2 = " ".join(words[best_split_idx:])
+    return f"{line1}\\N{line2}"
+
+
 def _build_ass(segments: list[dict], duration: float,
                target_lang: str, output_dir: str, job_id: str, ci: int,
                sub_region: dict | None = None,
                orig_w: int = 1920, orig_h: int = 1080) -> str | None:
-    """Generate ASS subtitle file for this chunk's segments in output_dir."""
+    """Generate ASS subtitle file for this chunk's segments in output_dir.
+    
+    Cổng chuẩn từ sever_v2/sever/services/overlay_render_service.py:
+    - PlayResX/Y theo khung hình output thật (tránh méo chữ khi 9:16).
+    - Scale mọi giá trị font/margin từ baseline 1920x1080.
+    - Dilated stroke (~28% font_size, outline ~3.5-11px), shadow=0.0 nét đậm chuẩn TikTok/CapCut.
+    - PrimaryColour=#FFFFFF, OutlineColour=#000000, Bold=-1.
+    - Alignment=2 (bottom-center).
+    - Wrap cân bằng 2 dòng tại điểm giữa tránh rách chữ.
+    """
     if not segments:
         return None
 
@@ -375,117 +448,90 @@ def _build_ass(segments: list[dict], duration: float,
     if user_fs <= 0:
         user_fs = 38
 
-    sub_style = str(settings.get("sub_style", "white_black")).lower()
-    is_box_style = ("box" in sub_style)
+    # Match PlayRes với khung hình video thật (tránh méo font trên video dọc 9:16 / 3:4)
+    play_res_x = orig_w if orig_w > 0 else 1920
+    play_res_y = orig_h if orig_h > 0 else 1080
 
-    box_h = 0
-    if sub_region:
-        box_h = int(sub_region.get("h", 0) or 0)
+    scale_horizontal = play_res_x / 1920.0
+    scale_vertical = play_res_y / 1080.0
 
-    # Căn chỉnh font size và độ dày nền/viền phụ đề tự động khớp chiều cao với box blur
-    if box_h > 15:
-        if is_box_style:
-            # Dạng hộp (Box style): Font chữ chiếm ~65% chiều cao, phần còn lại làm padding hộp đen che trọn sub gốc
-            font_size = max(20, min(int(box_h * 0.65), 70))
-            outline_val = max(2, int((box_h - font_size) / 2.0))
-            shadow_val = 0
-            border_style = 3
-        else:
-            # Dạng viền chữ (Outline style): Font chữ chiếm ~75% chiều cao box blur
-            font_size = max(22, min(int(box_h * 0.75), 70))
-            outline_val = max(2, min(6, int((box_h - font_size) / 4.0)))
-            shadow_val = 1
-            border_style = 1
-    else:
-        font_size = user_fs
-        outline_val = 2
-        shadow_val = 0 if is_box_style else 1
-        border_style = 3 if is_box_style else 1
+    # Rescale font size từ baseline 1080p
+    font_size = max(16, round(user_fs * scale_vertical))
 
-    pos_tag = ""
-    if sub_region:
-        box_x = float(sub_region.get("x", 0))
-        box_y = float(sub_region.get("y", 0))
-        box_w_val = float(sub_region.get("w", 0))
-        box_h_val = float(sub_region.get("h", 0))
-        center_x = int(box_x + (box_w_val / 2.0)) if box_w_val > 50 else int(orig_w / 2.0)
-        center_y = int(box_y + (box_h_val / 2.0))
-        pos_tag = f"{{\\an5\\pos({center_x},{center_y})}}"
-
-    margin_v = int(orig_h * 0.05)
+    # Dilated high-contrast stroke (CapCut/TikTok style):
+    # Viền đen dày ~28% kích thước font, shadow=0 để chữ sắc nét tuyệt đối không bị nhòe
+    outline_width = max(3.0, round(font_size * 0.28, 1))
+    shadow = 0.0
+    bold = -1
     alignment_val = 2
 
-    # Giới hạn bề rộng chữ = chiều rộng box blur của sub gốc (nếu có)
-    usable_w = int(orig_w * 0.9)
-    if sub_region:
-        box_w = int(sub_region.get("w", 0) or 0) + 24
-        if box_w > 40:
-            usable_w = min(usable_w, box_w)
+    margin_v = max(35, round(35 * scale_vertical))
+    margin_l = max(20, round(20 * scale_horizontal))
+    margin_r = max(20, round(20 * scale_horizontal))
 
-    if "yellow_box" in sub_style:
-        # Chữ vàng nền hộp đen mờ
-        pri_col = "&H0000FFFF"
-        out_col = "&H00000000"
-        bak_col = "&H60000000"
-    elif "white_box" in sub_style:
-        # Chữ trắng nền hộp đen mờ
-        pri_col = "&H00FFFFFF"
-        out_col = "&H00000000"
-        bak_col = "&H60000000"
-    elif "yellow" in sub_style:
-        # Chữ vàng viền đen
-        pri_col = "&H0000FFFF"
-        out_col = "&H00000000"
-        bak_col = "&H00000000"
+    # Căn giữa phụ đề chính xác vào TÂM CỦA BOX BLUR (không phải giữa video)
+    # Dùng \an5\pos(center_x, center_y) để căn giữa cả chiều dọc lẫn chiều ngang bên trong box blur
+    pos_tag = ""
+    max_chars = max(18, int(34 * scale_horizontal))
+
+    if sub_region and float(sub_region.get("h", 0)) > 0:
+        box_x = float(sub_region.get("x", 0))
+        box_y = float(sub_region.get("y", 0))
+        box_w = float(sub_region.get("w", play_res_x))
+        box_h = float(sub_region.get("h", 0))
+
+        # Tâm dọc và tâm ngang của box blur
+        center_x = round(sub_region.get("center_x", box_x + box_w / 2.0))
+        center_y = round(sub_region.get("center_y", box_y + box_h / 2.0))
+
+        # Bảo vệ: Giữ tâm phụ đề nằm ở vùng dưới (>= 55% màn hình) để tuyệt đối không nhảy lên giữa video
+        min_safe_y = int(play_res_y * 0.55)
+        max_safe_y = int(play_res_y - font_size * 1.2)
+        center_y = max(min_safe_y, min(max_safe_y, center_y))
+
+        pos_tag = f"{{\\an5\\pos({center_x},{center_y})}}"
+
+        # Giới hạn số ký tự trên 1 dòng để chữ nằm gọn bên trong box blur, không tràn viền
+        usable_box_w = max(int(box_w * 0.90), int(play_res_x * 0.45))
+        char_w = max(12, int(font_size * 0.52))
+        max_box_chars = max(16, int(usable_box_w / char_w))
+        max_chars = min(max_chars, max_box_chars)
     else:
-        # Mặc định: Chữ trắng viền đen sắc nét
-        pri_col = "&H00FFFFFF"
-        out_col = "&H00000000"
-        bak_col = "&H00000000"
+        # Fallback vị trí đáy màn hình (86% chiều cao, KHÔNG PHẢI giữa video)
+        def_x = round(play_res_x / 2.0)
+        def_y = round(play_res_y - max(35, round(55 * scale_vertical)))
+        pos_tag = f"{{\\an2\\pos({def_x},{def_y})}}"
+
+    sub_style = str(settings.get("sub_style", "white_black")).lower()
+    if "yellow" in sub_style:
+        pri_col = "&H0000FFFF"  # Vàng
+    else:
+        pri_col = "&H00FFFFFF"  # Trắng
+
+    out_col = "&H00000000"  # Viền đen
+    bak_col = "&H00000000"
 
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
-        f"PlayResX: {orig_w}",
-        f"PlayResY: {orig_h}",
+        f"PlayResX: {play_res_x}",
+        f"PlayResY: {play_res_y}",
         "WrapStyle: 2",
         "",
         "[V4+ Styles]",
-        f"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour,"
-        f" OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut,"
-        f" ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow,"
-        f" Alignment, MarginL, MarginR, MarginV, Encoding",
-    ]
-
-    if is_box_style:
-        # Tách làm 2 layers độc lập:
-        # Layer 0 (SubBox): Nền hộp bo tròn góc êm (\blur5 trên viền hộp, chữ trong suốt 100%)
-        # Layer 1 (SubText): Chữ phụ đề sắc nét, rõ ràng 100%, không bị dính mờ
-        lines.append(
-            f"Style: SubBox,{font},{font_size},&HFF000000,&H000000FF,"
-            f"{out_col},{bak_col},1,0,0,0,100,100,0,0,3,{outline_val},0,"
-            f"{alignment_val},10,10,{margin_v},1"
-        )
-        lines.append(
-            f"Style: SubText,{font},{font_size},{pri_col},&H000000FF,"
-            f"&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,"
-            f"{alignment_val},10,10,{margin_v},1"
-        )
-    else:
-        # Kiểu chữ viền đen truyền thống sắc nét
-        lines.append(
-            f"Style: Default,{font},{font_size},{pri_col},&H000000FF,"
-            f"{out_col},{bak_col},1,0,0,0,100,100,0,0,{border_style},{outline_val},{shadow_val},"
-            f"{alignment_val},10,10,{margin_v},1"
-        )
-
-    lines.extend([
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour,"
+        " OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut,"
+        " ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow,"
+        " Alignment, MarginL, MarginR, MarginV, Encoding",
+        f"Style: Default,{font},{font_size},{pri_col},&H000000FF,{out_col},{bak_col},"
+        f"{bold},0,0,0,100,100,0,0,1,{outline_width},{shadow},{alignment_val},"
+        f"{margin_l},{margin_r},{margin_v},1",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    ])
+    ]
 
-    # ponytail: Resolve overlapping segments so ASS doesn't stack dialogue lines.
+    # Resolve overlapping segments
     cleaned = _resolve_overlaps(segments, duration)
 
     for seg in cleaned:
@@ -498,72 +544,22 @@ def _build_ass(segments: list[dict], duration: float,
             continue
         start_ts = _fmt_time(s)
         end_ts = _fmt_time(e)
-        fit_text = _fit_subtitle_text(text, font_size, usable_w)
-
-        if is_box_style:
-            # Layer 0: Vẽ nền hộp bo tròn mềm
-            box_tag = f"{pos_tag[:-1]}\\blur5}}" if pos_tag else "{\\blur5}"
-            lines.append(f"Dialogue: 0,{start_ts},{end_ts},SubBox,,0,0,0,,{box_tag}{fit_text}")
-            # Layer 1: Vẽ chữ phụ đề sắc nét đè lên trên nền
-            text_tag = f"{pos_tag}" if pos_tag else ""
-            lines.append(f"Dialogue: 1,{start_ts},{end_ts},SubText,,0,0,0,,{text_tag}{fit_text}")
-        else:
-            line_content = f"{pos_tag}{fit_text}" if pos_tag else fit_text
-            lines.append(f"Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{line_content}")
+        fit_text = _wrap_text_lines(text, max_chars=max_chars)
+        lines.append(f"Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{pos_tag}{fit_text}")
 
     ass_path = os.path.join(output_dir, f"{job_id}_ch{ci:04d}.ass")
     with open(ass_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    logger.info("overlay: ASS subtitle generated: %s (%d segments)", ass_path, len(segments))
+    logger.info("overlay: ASS subtitle generated: %s (%d segments, font=%d, outline=%.1f)",
+                ass_path, len(segments), font_size, outline_width)
     return ass_path
 
 
 def _fit_subtitle_text(text: str, font_size: int, usable_w: int) -> str:
-    """Smart Word-Wrap: Tự động tính toán chiều rộng và ngắt dòng cân đối chống tràn màn hình.
-    
-    - Với câu ngắn vừa trong 1 dòng: giữ nguyên 1 dòng gọn gàng.
-    - Với câu dài (> max_chars_per_line): tách thành 2 dòng cân bằng tại ranh giới từ (word boundary).
-    - Dùng ký hiệu \\N của chuẩn ASS để ngắt dòng hiển thị tự nhiên.
-    """
-    clean_text = str(text or "").strip().replace("\r", "").replace("\n", " ")
-    # Escape { và } để tránh xung đột với style tags trong định dạng ASS
-    clean_text = clean_text.replace("{", "(").replace("}", ")")
-    if not clean_text:
-        return ""
-
-    # Ước lượng số ký tự tối đa vừa trên 1 dòng
-    # 1 ký tự trung bình ~ 0.52 * font_size pixel
+    """Fallback tương thích ngược: chuyển tiếp sang _wrap_text_lines."""
     char_w = max(12, int(font_size * 0.52))
     max_chars = max(16, int(usable_w / char_w))
-
-    if len(clean_text) <= max_chars:
-        return clean_text
-
-    # Tách từ để tìm điểm ngắt dòng tối ưu
-    words = clean_text.split(" ")
-    if len(words) <= 1:
-        # Chuỗi dính liền không khoảng trắng: ngắt đôi ở giữa
-        mid = len(clean_text) // 2
-        return f"{clean_text[:mid]}\\N{clean_text[mid:]}"
-
-    total_len = len(clean_text)
-    best_split_idx = -1
-    best_diff = float("inf")
-    accum = 0
-
-    for i in range(len(words) - 1):
-        accum += len(words[i]) + 1
-        diff = abs((total_len / 2.0) - accum)
-        if diff < best_diff:
-            best_diff = diff
-            best_split_idx = i
-
-    if best_split_idx >= 0:
-        line1 = " ".join(words[:best_split_idx + 1]).strip()
-        line2 = " ".join(words[best_split_idx + 1:]).strip()
-        return f"{line1}\\N{line2}"
-
-    return clean_text
+    return _wrap_text_lines(text, max_chars)
 
 
 def _fit_single_line(text: str, base_fs: int, usable_w: int) -> str:

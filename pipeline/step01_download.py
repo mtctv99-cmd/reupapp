@@ -72,13 +72,16 @@ async def _apply_speed(video_path: str, speed: float) -> str:
     speed_path = os.path.join(dir_name, f"{base_name}{speed_tag}{ext}")
     ffmpeg_bin = find_executable(settings.get("ffmpeg_path", "ffmpeg")) or "ffmpeg"
 
+    from core.ffmpeg import get_best_video_encoder
+    enc_args = get_best_video_encoder()
+
     # ponytail: try video+audio first, if no audio stream → video-only
     cmd = [
         ffmpeg_bin, "-y",
         "-i", video_path,
         "-filter_complex", f"[0:v]setpts=PTS/{speed}[v];[0:a]atempo={speed}[a]",
         "-map", "[v]", "-map", "[a]",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac",
+        *enc_args, "-pix_fmt", "yuv420p", "-c:a", "aac",
         speed_path
     ]
     logger.info("Applying x%.2f speed adjustment to video: %s -> %s", speed, video_path, speed_path)
@@ -99,7 +102,7 @@ async def _apply_speed(video_path: str, speed: float) -> str:
                 "-i", video_path,
                 "-filter_complex", f"[0:v]setpts=PTS/{speed}[v]",
                 "-map", "[v]",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
+                *enc_args, "-pix_fmt", "yuv420p",
                 "-an",
                 speed_path
             ]
