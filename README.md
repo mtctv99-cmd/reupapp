@@ -1,68 +1,64 @@
-# Sever Desktop
+# Sever Dub Studio Pro
 
-Desktop app cho media pipeline — kế thừa logic từ sever_v2 backend, đơn giản hoá chạy local.
+Ứng dụng desktop tự động thuyết minh video: tải video → nhận dạng giọng nói → dịch → lồng tiếng → render phụ đề → xuất video hoàn chỉnh. Chạy hoàn toàn trên máy, không cần server ngoài.
 
-## Pipeline 8 bước
+## Tính năng
 
-| # | Bước | Mô tả | Công cụ |
-|---|------|-------|---------|
-| 1 | **Download** | Tải video từ YouTube / Bilibili | yt-dlp / BBDown |
-| 2 | **Watermark** | Detect vùng có sub cứng / logo cần blur | RapidOCR + temporal voting |
-| 3 | **Audio chunk** | Split video → chunks, extract audio | FFmpeg scene detect |
-| 4 | **STT** | Speech-to-text từng chunk | FunASR/Paraformer hoặc OpenAI Whisper API |
-| 5 | **Translate** | Dịch segment text | Google Translate (free) hoặc sever server |
-| 6 | **TTS** | Text-to-speech từng segment | edge-tts (free, local) hoặc sever TTS server |
-| 7 | **Overlay** | Blur sub cũ + overlay TTS + sub mới lên chunk | FFmpeg + ASS |
-| 8 | **Concat** | Ghép chunks thành video hoàn chỉnh | FFmpeg concat |
+- **8 bước pipeline**: Download → Watermark/Sub detect → Audio chunk → STT → Translate → TTS → Overlay → Concat.
+- **STT local**: FunASR Paraformer + FSMN-VAD + dấu câu, tự tải model về `%APPDATA%/SeverDesktop/models_cache`.
+- **Dịch**: Gemini 3.5 Flash Lite qua Gemini web (guest miễn phí); thêm tài khoản Google trong Settings để tăng hạn mức.
+- **TTS local**: Piper `ngoc_huyen` (offline, ~0.2–0.6 s/câu) + 2 giọng CapCut (TikTok) dùng session TikTok.
+- **Phụ đề**: ASS căn giữa box blur, viền đậm chuẩn CapCut/TikTok, canvas theo đúng khung hình.
+- **Encode**: tự dò NVENC / QSV / AMF, fallback `libx264`; concat không re-encode, tự fallback khi cần.
+- **Giao diện**: pywebview (WebView2) hoặc trình duyệt, theme Fluent Windows 11.
+
+## Yêu cầu
+
+- Python 3.11+
+- FFmpeg / ffprobe / yt-dlp / BBDown (bản build full đã kèm sẵn trong `bin/`)
 
 ## Cài đặt
 
 ```bash
 pip install -r requirements.txt
-
-# Optional: thêm FunASR cho STT local
-pip install funasr modelscope
-
-# FFmpeg + yt-dlp + BBDown (cài riêng)
-# Windows: choco install ffmpeg yt-dlp
-# hoặc download từ ffmpeg.org, yt-dlp.github.io
 ```
 
 ## Chạy
 
 ```bash
-python ui/app.py
+python run.py          # mở cửa sổ desktop
 ```
+
+Hoặc chạy riêng backend để mở bằng trình duyệt:
+
+```bash
+python -m uvicorn app:app --host 127.0.0.1 --port 15577
+# http://127.0.0.1:15577
+```
+
+## Build
+
+- `BUILD_LITE.bat` — bản nhẹ, không kèm model AI.
+- `BUILD_FULL.bat` — bản offline đầy đủ: kèm FunASR models, Piper voice, binaries, đóng gói bằng Inno Setup.
 
 ## Cấu trúc
 
 ```
 sever_desktop/
-├── core/
-│   ├── config.py      # Settings manager (JSON)
-│   ├── db.py          # SQLite job store
-│   └── ffmpeg.py      # FFmpeg helpers
-├── pipeline/
-│   ├── step01_download.py
-│   ├── step02_watermark.py
-│   ├── step03_audio_chunk.py
-│   ├── step04_stt.py
-│   ├── step05_translate.py
-│   ├── step06_tts.py
-│   ├── step07_overlay.py
-│   ├── step08_concat.py
-│   └── orchestrator.py   # Pipeline runner
-├── ui/
-│   └── app.py            # CustomTkinter desktop UI
-├── providers/             # Future: provider plugins
-├── requirements.txt
-└── README.md
+├── run.py                 # Entry point: backend thread + pywebview
+├── app.py                 # FastAPI server + REST API
+├── core/                  # config, SQLite jobs, ffmpeg, auth (tiktok/google/bilibili)
+├── pipeline/              # step01..step08 + orchestrator
+├── providers/             # gemini_stealth
+├── src/                   # UI web (index.html, app.js, styles.css, icons/)
+├── models/piper/          # voice ONNX (không commit)
+├── hooks/                 # runtime hook PyInstaller
+├── installer.iss          # Inno Setup
+└── SeverDubStudioPro.spec # PyInstaller
 ```
 
-## Settings
+## Ghi chú
 
-- **STT providers**: FunASR (local), OpenAI Whisper API
-- **TTS providers**: edge-tts (local, free), sever TTS server
-- **Translate providers**: Google (free API), sever translate server
-- **Paths**: ffmpeg, ffprobe, yt-dlp, BBDown paths
-- **General**: source/target language, subtitle font, remove_sub toggle
+- Settings lưu tại `%APPDATA%/SeverDesktop/settings.json`; job DB tại `jobs.db`.
+- Model AI và binaries tự tải lần đầu nếu bản cài không kèm.
+- Tài khoản (Bilibili / CapCut / Google) thêm trong **Settings**; cookie/token lưu cục bộ, không gửi đi đâu khác.
