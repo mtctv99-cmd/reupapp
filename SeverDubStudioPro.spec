@@ -5,6 +5,14 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 rapidocr_dir = os.path.dirname(rapidocr_onnxruntime.__file__)
 
+# ── Settings: ưu tiên settings.json của máy build, không có thì dùng file mẫu ──
+_settings_src = 'settings.json'
+if not os.path.exists(_settings_src):
+    import shutil
+    os.makedirs('.build_settings', exist_ok=True)
+    shutil.copy('settings.example.json', os.path.join('.build_settings', 'settings.json'))
+    _settings_src = os.path.join('.build_settings', 'settings.json')
+
 # ── Bundle STT models (Bản Lite: Tự tải về %APPDATA%/SeverDesktop/models_cache; Bản Full: bundle kèm) ──
 _BUILD_LITE = os.environ.get("BUILD_LITE", "0") == "1"
 _models_datas = []
@@ -65,7 +73,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('src', 'src'),
-        ('settings.json', '.'),
+        (_settings_src, '.'),
     ] + _bin_datas + _playwright_datas + _rapidocr_datas + _models_datas + _piper_datas + collect_data_files('funasr') + collect_data_files('modelscope'),
     hiddenimports=[
         # uvicorn

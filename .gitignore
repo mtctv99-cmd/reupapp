@@ -26,3 +26,4 @@ models/
 .v2c/
 *.log
 
+settings.json
