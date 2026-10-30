@@ -237,16 +237,8 @@ async def run_tts(text: str, voice: str = "", max_retries: int = 2, speed: float
                     if attempt < max_retries - 1:
                         await asyncio.sleep(_backoff_sec(attempt))
 
-    # 2. Thử Remote TikTok TTS Server
-    servers = settings.get_tts_servers()
-    if not servers:
-        ttsp = settings.get("tts_provider", {})
-        url = ttsp.get("url", "https://tts.maika.sbs")
-        api_key = ttsp.get("api_key", "omni-secret-key-123")
-        if url:
-            servers = [{"url": url, "api_key": api_key, "voice": v_norm}]
-    if not servers:
-        servers = [{"url": "https://tts.maika.sbs", "api_key": "omni-secret-key-123", "voice": v_norm}]
+    # 2. Remote TTS server — chỉ dùng nếu người dùng tự cấu hình, không fallback host chết
+    servers = settings.get_tts_servers() or []
 
     for idx, server in enumerate(servers):
         url = server.get("url", "").rstrip("/")

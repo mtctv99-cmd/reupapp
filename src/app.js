@@ -37,13 +37,23 @@ function escapeHtml(str) {
   return String(str || "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
 }
 
+// Icon slot cho markup JS chèn. name phải có trong src/icons/ (xem bảng ánh xạ);
+// cùng dạng với index.html: <span class="fluent-icon" style="--icon:url('icons/x.svg')">.
+function ic(name, extra = "") {
+  return `<span class="fluent-icon${extra ? " " + extra : ""}" style="--icon:url('icons/${name}.svg')" aria-hidden="true"></span>`;
+}
+function btnHtml(name, label, spin = false) {
+  return `${ic(name, spin ? "spin" : "")}${label}`;
+}
+
 // ── Toast / Loading ──────────────────────────────────────────
-function showToast(msg, type = "info", duration = 3000) {
+function showToast(msg, type = "info", duration = 3000, iconName = "") {
   const c = document.getElementById("toast-container");
   if (!c) return;
   const t = document.createElement("div");
   t.className = `toast toast-${type}`;
-  t.textContent = msg;
+  if (iconName) t.innerHTML = ic(iconName) + escapeHtml(msg);
+  else t.textContent = msg;
   c.appendChild(t);
   setTimeout(() => t.remove(), duration);
 }
@@ -74,7 +84,7 @@ function showConfirm(msg, withInput) {
     ov.className = "modal-overlay";
     const inp = withInput ? '<input type="text" id="confirm-input" style="width:100%;margin-top:8px;background:var(--surface);border:1px solid var(--border-strong);color:#fff;border-radius:var(--radius-sm);padding:7px 10px;font-size:12px;" placeholder="Nhập ở đây..." />' : "";
     const yesLbl = withInput ? "Xác nhận" : "Đồng ý";
-    ov.innerHTML = `<div class="modal-card modal-card-confirm"><div class="modal-header"><span class="modal-icon">⚠️</span><h3 class="modal-title-blue">Xác nhận</h3></div><div class="modal-body"><p>${escapeHtml(msg)}</p>${inp}</div><div class="modal-footer confirm-actions"><button class="btn-secondary" id="confirm-no">Hủy</button><button class="btn-primary" id="confirm-yes">${yesLbl}</button></div></div>`;
+    ov.innerHTML = `<div class="modal-card modal-card-confirm"><div class="modal-header"><span class="modal-icon">${ic("triangle-alert")}</span><h3 class="modal-title-blue">Xác nhận</h3></div><div class="modal-body"><p>${escapeHtml(msg)}</p>${inp}</div><div class="modal-footer confirm-actions"><button class="btn-secondary" id="confirm-no">Hủy</button><button class="btn-primary" id="confirm-yes">${yesLbl}</button></div></div>`;
     document.body.appendChild(ov);
     ov.querySelector("#confirm-no").onclick = () => { ov.remove(); resolve(withInput ? null : false); };
     ov.querySelector("#confirm-yes").onclick = () => {
@@ -104,7 +114,6 @@ const selectLogoPos = document.getElementById("select-logo-pos");
 const selectLogoOpacity = document.getElementById("select-logo-opacity");
 const btnStart = document.getElementById("btn-start");
 const btnPaste = document.getElementById("btn-paste");
-const btnRefresh = document.getElementById("btn-refresh");
 const progressFill = document.getElementById("progress-fill");
 const trackerPct = document.getElementById("tracker-pct");
 const trackerElapsed = document.getElementById("tracker-elapsed");
@@ -163,11 +172,11 @@ async function loadJobs() {
       <span class="job-item-title" title="${escapeHtml(j.title || j.id)}">${escapeHtml(j.title || j.id)}</span>
       <div class="job-item-actions">
         ${j.status === "done" ? `
-          <button class="btn-job-action btn-job-play-native" data-job-id="${j.id}" title="Phát video">▶</button>
-          <button class="btn-job-action btn-job-folder-native" data-job-id="${j.id}" title="Mở thư mục chứa video">📂</button>
+          <button class="btn-job-action btn-job-play-native" data-job-id="${j.id}" title="Phát video">${ic("play")}</button>
+          <button class="btn-job-action btn-job-folder-native" data-job-id="${j.id}" title="Mở thư mục chứa video">${ic("folder-open")}</button>
         ` : ""}
         <span class="job-item-status status-${j.status}">${j.status}</span>
-        <button class="btn-job-del-single" data-job-id="${j.id}" title="Xóa">🗑</button>
+        <button class="btn-job-del-single" data-job-id="${j.id}" title="Xóa">${ic("trash-2")}</button>
       </div>
     </div>
   `).join("");
@@ -245,12 +254,12 @@ async function loadOutputPreview(job) {
   const res = await apiFetch(`/jobs/output?id=${job.id}`);
   if (!res || !res.data || !res.data.exists || !res.data.output_path) {
     clearOutput();
-    if (outputTitle) outputTitle.textContent = `🎬 ${job.title || job.id} (chưa có video kết quả)`;
+    if (outputTitle) outputTitle.innerHTML = `${ic("film")} ${escapeHtml(job.title || job.id)} (chưa có video kết quả)`;
     return;
   }
   outputVideo.src = "/media?path=" + encodeURIComponent(res.data.output_path);
   outputVideo.load();
-  if (outputTitle) outputTitle.textContent = `🎬 ${job.title || job.id}`;
+  if (outputTitle) outputTitle.innerHTML = `${ic("film")} ${escapeHtml(job.title || job.id)}`;
   outputFolderPath = res.data.output_dir || "";
 }
 
@@ -309,21 +318,22 @@ async function loadSettings() {
 }
 
 async function checkBilibiliStatus() {
-  const res = await apiFetch("/bilibili/status");
   const icon = document.getElementById("bili-status-icon");
   const text = document.getElementById("bili-status-text");
   const detail = document.getElementById("bili-status-detail");
   const logoutBtn = document.getElementById("btn-bili-logout");
+  if (!text) return;  // thẻ trạng thái đã bị bỏ khỏi UI
+  const res = await apiFetch("/bilibili/status");
   if (!res || !res.data) return;
   const d = res.data;
   if (d.logged_in) {
-    icon.textContent = "✅";
+    icon.innerHTML = ic("circle-check");
     text.textContent = "Đã đăng nhập Bilibili";
     detail.textContent = d.username || d.account_name || "";
     text.style.color = "var(--ok)";
     logoutBtn.classList.remove("hidden");
   } else {
-    icon.textContent = "🔒";
+    icon.innerHTML = ic("lock");
     text.textContent = "Chưa đăng nhập Bilibili";
     detail.textContent = d.message || "Quét QR hoặc dán cookie để đăng nhập";
     text.style.color = "var(--text)";
@@ -340,11 +350,11 @@ async function createBiliQR() {
   const btnCreate = document.getElementById("btn-bili-create-qr");
 
   btnCreate.disabled = true;
-  btnCreate.textContent = "⏳ Đang tạo...";
+  btnCreate.innerHTML = btnHtml("loader-circle", "Đang tạo...", true);
 
   const res = await apiFetch("/bilibili/qrcode");
   btnCreate.disabled = false;
-  btnCreate.textContent = "📱 Tạo QR Code";
+  btnCreate.innerHTML = btnHtml("smartphone", "Tạo QR Code");
 
   if (!res || !res.data) {
     showToast(res?.error || "Không tạo được QR", "error");
@@ -390,7 +400,7 @@ async function createBiliQR() {
     if (st === "scan_success" || st === 0 || pollRes.data.logged_in) {
       clearInterval(biliPollTimer);
       clearInterval(countdownInterval);
-      qrCountdown.textContent = "✅ Đăng nhập thành công!";
+      qrCountdown.innerHTML = `${ic("circle-check")} Đăng nhập thành công!`;
       qrCountdown.style.color = "var(--ok)";
       showToast("Đăng nhập Bilibili thành công!", "success");
       setTimeout(() => {
@@ -415,7 +425,7 @@ async function refreshBiliSession() {
   const btn = document.getElementById("btn-bili-refresh-session");
   if (btn) {
     btn.disabled = true;
-    btn.textContent = "⏳ Đang kiểm tra...";
+    btn.innerHTML = btnHtml("loader-circle", "Đang kiểm tra...", true);
   }
   try {
     const res = await apiFetch("/bilibili/refresh", { method: "POST", body: JSON.stringify({}) });
@@ -429,26 +439,9 @@ async function refreshBiliSession() {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.textContent = "🔄 Làm mới";
+      btn.innerHTML = btnHtml("refresh-cw", "Làm mới");
     }
     checkBilibiliStatus();
-  }
-}
-
-async function saveBiliCookie() {
-  const inp = document.getElementById("bili-cookie-input");
-  const cookie = inp.value.trim();
-  if (!cookie) { showToast("Vui lòng dán cookie", "error"); return; }
-  const res = await apiFetch("/bilibili/cookie", {
-    method: "POST",
-    body: JSON.stringify({ cookie }),
-  });
-  if (res && (res.status === "ok" || res.data?.account_id)) {
-    showToast(res.message || "Đã lưu cookie Bilibili thành công!", "success");
-    inp.value = "";
-    checkBilibiliStatus();
-  } else {
-    showToast(res?.error || res?.detail || "Cookie không hợp lệ", "error");
   }
 }
 
@@ -474,13 +467,42 @@ async function loadTiktokAccounts() {
     const row = document.createElement("div");
     row.className = "flex-between concat-file-item";
     const label = document.createElement("span");
-    label.textContent = `🎵 ${a.name || "TikTok"} — ${a.preview} (${a.added_at || ""})`;
+    label.innerHTML = `${ic("music")} ${escapeHtml(a.name || "TikTok")} — ${escapeHtml(a.preview)} (${escapeHtml(a.added_at || "")})`;
     const btn = document.createElement("button");
     btn.className = "btn-danger btn-sm";
-    btn.textContent = "🗑️";
+    btn.innerHTML = ic("trash-2");
     btn.addEventListener("click", async () => {
       await apiFetch(`/tiktok/account?sessionid=${encodeURIComponent(a.sessionid)}`, { method: "DELETE" });
       loadTiktokAccounts();
+    });
+    row.append(label, btn);
+    box.appendChild(row);
+  });
+}
+
+// ── Google (Gemini) accounts ─────────────────────────────────
+async function loadGoogleAccounts() {
+  const box = document.getElementById("google-accounts-list");
+  if (!box) return;
+  const res = await apiFetch("/google/accounts");
+  const accounts = res?.accounts || [];
+  if (!accounts.length) {
+    box.innerHTML = '<p class="text-sub">Chưa có tài khoản nào.</p>';
+    return;
+  }
+  box.innerHTML = "";
+  accounts.forEach((a) => {
+    const row = document.createElement("div");
+    row.className = "flex-between concat-file-item";
+    const label = document.createElement("span");
+    const state = a.has_token ? "token OK" : "thiếu token";
+    label.innerHTML = `${ic("chrome")} ${escapeHtml(a.name || "Google")} — ${escapeHtml(a.preview || "")} (${escapeHtml(a.added_at || "")}, ${state})`;
+    const btn = document.createElement("button");
+    btn.className = "btn-danger btn-sm";
+    btn.innerHTML = ic("trash-2");
+    btn.addEventListener("click", async () => {
+      await apiFetch(`/google/account?id=${encodeURIComponent(a.id)}`, { method: "DELETE" });
+      loadGoogleAccounts();
     });
     row.append(label, btn);
     box.appendChild(row);
@@ -494,10 +516,10 @@ async function fetchAndTranslateTitle() {
   }
   if (btnFetchTitle) {
     btnFetchTitle.disabled = true;
-    btnFetchTitle.textContent = "⏳ Đang lấy...";
+    btnFetchTitle.innerHTML = btnHtml("loader-circle", "Đang lấy...", true);
   }
   if (inputVideoTitle && !inputVideoTitle.value) {
-    inputVideoTitle.placeholder = "🔄 Đang lấy & dịch tiêu đề (bạn có thể bấm Khởi Chạy ngay)...";
+    inputVideoTitle.placeholder = "Đang lấy & dịch tiêu đề (bạn có thể bấm Khởi Chạy ngay)...";
   }
   try {
     const res = await apiFetch("/fetch-title", {
@@ -513,7 +535,7 @@ async function fetchAndTranslateTitle() {
   } finally {
     if (btnFetchTitle) {
       btnFetchTitle.disabled = false;
-      btnFetchTitle.textContent = "🌐 Tự Lấy & Dịch Tiêu Đề";
+      btnFetchTitle.innerHTML = btnHtml("link", "Tự Lấy & Dịch Tiêu Đề");
     }
     if (inputVideoTitle && !inputVideoTitle.value) {
       inputVideoTitle.placeholder = "Nhập tiêu đề (hoặc để trống để hệ thống tự lấy & dịch khi chạy)...";
@@ -524,7 +546,7 @@ async function fetchAndTranslateTitle() {
 async function chooseOutputDir() {
   if (btnChooseOutputDir) {
     btnChooseOutputDir.disabled = true;
-    btnChooseOutputDir.textContent = "⏳ Đang mở...";
+    btnChooseOutputDir.innerHTML = btnHtml("loader-circle", "Đang mở...", true);
   }
   try {
     const res = await apiFetch("/choose-folder", { method: "POST" });
@@ -540,7 +562,7 @@ async function chooseOutputDir() {
   } finally {
     if (btnChooseOutputDir) {
       btnChooseOutputDir.disabled = false;
-      btnChooseOutputDir.textContent = "📂 Chọn Thư Mục";
+      btnChooseOutputDir.innerHTML = btnHtml("folder-open", "Chọn Thư Mục");
     }
   }
 }
@@ -750,7 +772,7 @@ function renderConcatFileList() {
     });
 
     const left = document.createElement("div"); left.className = "concat-item-left";
-    const dragHandle = document.createElement("span"); dragHandle.className = "concat-drag-handle"; dragHandle.textContent = "☰"; dragHandle.title = "Kéo để đổi thứ tự";
+    const dragHandle = document.createElement("span"); dragHandle.className = "concat-drag-handle"; dragHandle.innerHTML = ic("grip-vertical"); dragHandle.title = "Kéo để đổi thứ tự";
     const badge = document.createElement("span"); badge.className = "concat-order-badge"; badge.textContent = `#${i + 1}`;
     const thumb = document.createElement("video"); thumb.className = "concat-thumb-mini"; thumb.preload = "metadata";
     thumb.src = `/media?path=${encodeURIComponent(item.path)}#t=0.5`;
@@ -761,11 +783,11 @@ function renderConcatFileList() {
     left.append(dragHandle, badge, thumb, info);
 
     const actions = document.createElement("div"); actions.className = "concat-item-actions";
-    const up = document.createElement("button"); up.className = "btn-icon-step"; up.textContent = "⬆"; up.disabled = i === 0;
+    const up = document.createElement("button"); up.className = "btn-icon-step"; up.innerHTML = ic("arrow-up"); up.disabled = i === 0;
     up.addEventListener("click", () => moveConcatItem(i, -1));
-    const down = document.createElement("button"); down.className = "btn-icon-step"; down.textContent = "⬇"; down.disabled = i === concatFilesList.length - 1;
+    const down = document.createElement("button"); down.className = "btn-icon-step"; down.innerHTML = ic("arrow-down"); down.disabled = i === concatFilesList.length - 1;
     down.addEventListener("click", () => moveConcatItem(i, 1));
-    const del = document.createElement("button"); del.className = "btn-icon-delete"; del.textContent = "🗑️";
+    const del = document.createElement("button"); del.className = "btn-icon-delete"; del.innerHTML = ic("trash-2");
     del.addEventListener("click", () => removeConcatItem(i));
     actions.append(up, down, del);
     card.append(left, actions);
@@ -775,7 +797,7 @@ function renderConcatFileList() {
 
 async function startConcatProcess() {
   if (concatFilesList.length < 2) return;
-  btnStartConcat.disabled = true; concatStatusMsg.textContent = "⏳ Đang ghép...";
+  btnStartConcat.disabled = true; concatStatusMsg.innerHTML = `${ic("loader-circle", "spin")} Đang ghép...`;
   showLoading("Đang ghép video...");
   const res = await apiFetch("/tools/concat", { method: "POST", body: JSON.stringify({ files: concatFilesList.map(f => f.path) }) });
   btnStartConcat.disabled = false; hideLoading();
@@ -783,7 +805,7 @@ async function startConcatProcess() {
     showToast("Ghép video thành công!", "success");
     hideConcatModal(); concatFilesList = []; renderConcatFileList();
   } else {
-    concatStatusMsg.textContent = "❌ Ghép thất bại";
+    concatStatusMsg.innerHTML = `${ic("circle-x")} Ghép thất bại`;
     showToast("Lỗi: " + (res?.error || "Không kết nối server"), "error");
   }
 }
@@ -832,7 +854,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }, 3000);
 
-  btnRefresh.addEventListener("click", loadJobs);
   btnPaste.addEventListener("click", pasteClipboard);
   btnStart.addEventListener("click", startPipeline);
   btnCancel.addEventListener("click", cancelPipeline);
@@ -919,57 +940,50 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Settings modal — Tabs navigation
-  const tabBtnBili = document.getElementById("tab-btn-bili");
-  const tabBtnTiktok = document.getElementById("tab-btn-tiktok");
-  const tabContentBili = document.getElementById("tab-content-bili");
-  const tabContentTiktok = document.getElementById("tab-content-tiktok");
+  const settingsTabs = [
+    { btn: "tab-btn-bili", pane: "tab-content-bili", onShow: checkBilibiliStatus },
+    { btn: "tab-btn-tiktok", pane: "tab-content-tiktok", onShow: loadTiktokAccounts },
+    { btn: "tab-btn-google", pane: "tab-content-google", onShow: loadGoogleAccounts },
+  ].map((t) => ({
+    btnEl: document.getElementById(t.btn),
+    paneEl: document.getElementById(t.pane),
+    onShow: t.onShow,
+  }));
 
-  tabBtnBili?.addEventListener("click", () => {
-    tabBtnBili.classList.add("active");
-    tabBtnTiktok?.classList.remove("active");
-    tabContentBili?.classList.add("active");
-    tabContentTiktok?.classList.remove("active");
-  });
-
-  tabBtnTiktok?.addEventListener("click", () => {
-    tabBtnTiktok.classList.add("active");
-    tabBtnBili?.classList.remove("active");
-    tabContentTiktok?.classList.add("active");
-    tabContentBili?.classList.remove("active");
-    loadTiktokAccounts();
+  settingsTabs.forEach((tab) => {
+    tab.btnEl?.addEventListener("click", () => {
+      settingsTabs.forEach((other) => {
+        other.btnEl?.classList.remove("active");
+        other.paneEl?.classList.remove("active");
+      });
+      tab.btnEl?.classList.add("active");
+      tab.paneEl?.classList.add("active");
+      tab.onShow?.();
+    });
   });
 
   // Settings modal — Bilibili login
-  btnOpenSettings?.addEventListener("click", () => { modalSettings.classList.remove("hidden"); checkBilibiliStatus(); loadTiktokAccounts(); });
+  btnOpenSettings?.addEventListener("click", () => { modalSettings.classList.remove("hidden"); checkBilibiliStatus(); loadTiktokAccounts(); loadGoogleAccounts(); });
   btnCloseSettings?.addEventListener("click", () => modalSettings.classList.add("hidden"));
   modalSettings?.addEventListener("click", (e) => { if (e.target === modalSettings) modalSettings.classList.add("hidden"); });
 
   // Bilibili QR + Cookie
   document.getElementById("btn-bili-create-qr")?.addEventListener("click", createBiliQR);
-  document.getElementById("btn-bili-save-cookie")?.addEventListener("click", saveBiliCookie);
-  document.getElementById("btn-bili-refresh-session")?.addEventListener("click", refreshBiliSession);
-  document.getElementById("btn-bili-logout")?.addEventListener("click", logoutBili);
 
-  // TikTok TTS accounts
-  document.getElementById("btn-tiktok-refresh")?.addEventListener("click", loadTiktokAccounts);
+  // CapCut TTS accounts
   document.getElementById("btn-tiktok-login")?.addEventListener("click", async () => {
     const res = await apiFetch("/tiktok/open-browser", { method: "POST", body: JSON.stringify({}) });
-    showToast(res?.message || "Đã mở trình duyệt");
+    showToast(res?.message || "Đã mở trình duyệt đăng nhập");
     let n = 0;
     const timer = setInterval(async () => { await loadTiktokAccounts(); if (++n > 60) clearInterval(timer); }, 5000);
   });
-  document.getElementById("btn-tiktok-save-session")?.addEventListener("click", async () => {
-    const inp = document.getElementById("input-tiktok-sessionid");
-    const val = (inp?.value || "").trim();
-    if (!val) { showToast("Vui lòng dán Session ID", "error"); return; }
-    const res = await apiFetch("/tiktok/sync-cookie", { method: "POST", body: JSON.stringify({ sessionid: val }) });
-    if (res?.status === "ok") {
-      showToast("Đã thêm tài khoản TikTok!");
-      if (inp) inp.value = "";
-      loadTiktokAccounts();
-    } else {
-      showToast(res?.error || "Lưu thất bại", "error");
-    }
+
+  // Google (Gemini) accounts
+  document.getElementById("btn-google-login")?.addEventListener("click", async () => {
+    const res = await apiFetch("/google/open-browser", { method: "POST", body: JSON.stringify({}) });
+    showToast(res?.message || "Đã mở trình duyệt đăng nhập Google");
+    let n = 0;
+    const timer = setInterval(async () => { await loadGoogleAccounts(); if (++n > 100) clearInterval(timer); }, 3000);
   });
 
   // Voice select change
@@ -1083,7 +1097,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnStartModelDl = document.getElementById("btn-start-model-download");
   btnStartModelDl?.addEventListener("click", async () => {
     btnStartModelDl.disabled = true;
-    btnStartModelDl.textContent = "⏳ Đang tải dữ liệu...";
+    btnStartModelDl.innerHTML = btnHtml("loader-circle", "Đang tải dữ liệu...", true);
     await apiFetch("/models/download", { method: "POST" });
     
     if (modelPollTimer) clearInterval(modelPollTimer);
@@ -1106,7 +1120,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (d.progress >= 1.0 && !d.is_downloading) {
           clearInterval(modelPollTimer);
-          showToast("✅ Đã tải và cài đặt xong toàn bộ dữ liệu AI!");
+          showToast("Đã tải và cài đặt xong toàn bộ dữ liệu AI!", "info", 3000, "circle-check");
           setTimeout(() => {
             const modal = document.getElementById("modal-model-download");
             if (modal) modal.classList.add("hidden");
@@ -1114,8 +1128,19 @@ document.addEventListener("DOMContentLoaded", () => {
         } else if (d.error) {
           clearInterval(modelPollTimer);
           btnStartModelDl.disabled = false;
-          btnStartModelDl.textContent = "❌ Tải thất bại. Thử lại";
+          btnStartModelDl.innerHTML = btnHtml("circle-x", "Tải thất bại. Thử lại");
           showErrorModal("Lỗi tải Model AI: " + d.error);
+        } else if (!d.is_downloading) {
+          // Luồng tải đã dừng mà chưa xong: kiểm tra lại trạng thái thật thay vì quay vô hạn
+          clearInterval(modelPollTimer);
+          const s = await apiFetch("/models/status");
+          if (s && s.ready) {
+            document.getElementById("modal-model-download")?.classList.add("hidden");
+            return;
+          }
+          btnStartModelDl.disabled = false;
+          btnStartModelDl.innerHTML = btnHtml("circle-x", "Tải thất bại. Thử lại");
+          showErrorModal("Tải dữ liệu AI dừng giữa chừng. Kiểm tra mạng rồi thử lại.");
         }
       }
     }, 1500);
@@ -1149,8 +1174,6 @@ document.addEventListener("DOMContentLoaded", () => {
       if (manual) showToast("Không thể kết nối máy chủ cập nhật", "error");
     }
   }
-
-  document.getElementById("btn-check-update-manual")?.addEventListener("click", () => checkForUpdates(true));
 
   document.getElementById("btn-close-update-modal")?.addEventListener("click", () => {
     document.getElementById("modal-update")?.classList.add("hidden");

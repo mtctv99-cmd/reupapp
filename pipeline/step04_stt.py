@@ -20,6 +20,35 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def _disable_tqdm() -> None:
+    """FunASR tạo tqdm trong inference; console EXE không có stdout hợp lệ → OSError 22."""
+    try:
+        import tqdm as _t
+        import tqdm.std as _std
+
+        class _Quiet:
+            def __init__(self, *a, **k): pass
+            def __call__(self, iterable=None, *a, **k):
+                return iterable if iterable is not None else self
+            def __iter__(self): return iter(())
+            def __next__(self): raise StopIteration
+            def update(self, *a, **k): pass
+            def close(self): pass
+            def refresh(self, *a, **k): pass
+            def set_description(self, *a, **k): pass
+            def set_postfix(self, *a, **k): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        _t.tqdm = _Quiet
+        _std.tqdm = _Quiet
+    except Exception:
+        pass
+
+
+_disable_tqdm()
+
 # ── Registry ──────────────────────────────────────────────
 
 STT_PROVIDERS: dict[str, Callable[..., Awaitable[list[dict]]]] = {}
@@ -107,10 +136,27 @@ def _UNPATCH_MODELSCOPE_FOR_DOWNLOAD():
         pass
 
 
+def _local_snapshot(model_id: str) -> str | None:
+    """Trả về thư mục snapshot local của model nếu đã tải (tránh phụ thuộc resolve ModelScope)."""
+    try:
+        from core.models import get_models_cache_dir
+        base = get_models_cache_dir() / "models"
+    except Exception:
+        return None
+    for name in (model_id.replace("/", "--"), model_id.replace("/", "_"), model_id.split("/")[-1]):
+        snap = base / name / "snapshots" / "master"
+        if (snap / "config.yaml").exists():
+            return str(snap)
+    return None
+
+
 def _get_funasr_model(cfg: dict) -> Any:
     model_id = cfg.get("model", "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch")
     vad_id = cfg.get("vad_model", "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch")
     punc_id = cfg.get("punc_model", "iic/punc_ct-transformer_cn-en-common-vocab471067-large")
+    model_id = _local_snapshot(model_id) or model_id
+    vad_id = _local_snapshot(vad_id) or vad_id
+    punc_id = _local_snapshot(punc_id) or punc_id
     device = cfg.get("device") or settings.get("stt_device", "cpu")
     if device in ("auto", ""):
         import torch
@@ -727,11 +773,13 @@ async def stt_funasr(audio_path: str, source_lang: str = "zh", **kwargs) -> list
                     return model.generate(
                         input=audio_path, batch_size=1, sentence_timestamp=True,
                         return_raw_text=True, max_single_segment_time=10000, vad_tail_silence=250,
+                        disable_pbar=True,
                     )
             except Exception:
                 return model.generate(
                     input=audio_path, batch_size=1, sentence_timestamp=True,
                     return_raw_text=True, max_single_segment_time=10000, vad_tail_silence=250,
+                    disable_pbar=True,
                 )
 
     result = await asyncio.to_thread(_do_generate)

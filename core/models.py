@@ -42,7 +42,7 @@ BINARIES_CONFIG = [
     },
     {
         "name": "BBDown.exe",
-        "url": "https://github.com/nilaoda/BBDown/releases/download/1.6.3/BBDown_1.6.3_20240901_win-x64.zip",
+        "url": "https://github.com/nilaoda/BBDown/releases/download/1.6.3/BBDown_1.6.3_20240814_win-x64.zip",
         "is_zip": True,
         "extract_file": "BBDown.exe",
         "approx_mb": 18,
@@ -105,37 +105,68 @@ def check_binaries_installed() -> dict[str, Any]:
     }
 
 
-def download_missing_binaries(progress_cb: Callable[[str], None] | None = None) -> None:
-    """Tự động tải các binary còn thiếu về %APPDATA%/SeverDesktop/bin."""
+def download_missing_binaries(progress_cb: Callable[[str], None] | None = None) -> list[str]:
+    """Tải các binary còn thiếu. Lỗi từng món không chặn món khác; trả về danh sách lỗi."""
     target_dir = get_app_bin_dir()
-    ctx = urllib.request.ssl._create_unverified_context()
-    
-    for item in BINARIES_CONFIG:
-        dest_file = target_dir / item["name"]
-        if dest_file.exists() and dest_file.stat().st_size > 1000:
-            continue
-        
+    errors: list[str] = []
+    zip_cache: dict[str, Path] = {}
+
+    def _notify(msg: str) -> None:
         if progress_cb:
-            progress_cb(f"Đang tải {item['name']}...")
-        logger.info("Downloading binary %s from %s...", item["name"], item["url"])
-        
-        tmp_dest = target_dir / f"temp_{item['name']}"
-        if item.get("is_zip"):
-            tmp_zip = target_dir / "temp_bin.zip"
-            urllib.request.urlretrieve(item["url"], str(tmp_zip))
-            with zipfile.ZipFile(tmp_zip, "r") as z:
-                # Tìm file trong zip
-                for zinfo in z.infolist():
-                    if zinfo.filename.endswith(item["name"]) or zinfo.filename.endswith(item.get("extract_file", "")):
-                        with z.open(zinfo) as src, open(dest_file, "wb") as dst:
-                            dst.write(src.read())
-                        break
-            if tmp_zip.exists():
-                tmp_zip.unlink()
-        else:
-            urllib.request.urlretrieve(item["url"], str(dest_file))
-            
-    logger.info("All missing binaries verified in %s", target_dir)
+            progress_cb(msg)
+        with _DOWNLOAD_LOCK:
+            DOWNLOAD_STATE["current_model"] = msg
+        logger.info("binary: %s", msg)
+
+    try:
+        for item in BINARIES_CONFIG:
+            name = item["name"]
+            dest_file = target_dir / name
+            if dest_file.exists() and dest_file.stat().st_size > 1000:
+                continue
+
+            _notify(f"Đang tải {name}...")
+            try:
+                if item.get("is_zip"):
+                    tmp_zip = zip_cache.get(item["url"])
+                    if tmp_zip is None or not tmp_zip.exists():
+                        tmp_zip = target_dir / "temp_bin.zip"
+                        urllib.request.urlretrieve(item["url"], str(tmp_zip))
+                        zip_cache[item["url"]] = tmp_zip
+
+                    wanted = (item.get("extract_file") or name).replace("\\", "/")
+                    found = False
+                    with zipfile.ZipFile(tmp_zip, "r") as z:
+                        for zinfo in z.infolist():
+                            entry = zinfo.filename.replace("\\", "/")
+                            if entry == wanted or entry.endswith("/" + wanted) or entry.endswith(name):
+                                with z.open(zinfo) as src, open(dest_file, "wb") as dst:
+                                    dst.write(src.read())
+                                found = True
+                                break
+                    if not found:
+                        raise RuntimeError(f"{name} không có trong zip")
+                else:
+                    tmp_file = dest_file.with_name(dest_file.name + ".part")
+                    urllib.request.urlretrieve(item["url"], str(tmp_file))
+                    tmp_file.replace(dest_file)
+            except Exception as exc:
+                logger.warning("Binary %s download failed: %s", name, exc)
+                errors.append(f"{name}: {exc}")
+    finally:
+        for p in zip_cache.values():
+            try:
+                if p.exists():
+                    p.unlink()
+            except OSError:
+                pass
+
+    if errors:
+        with _DOWNLOAD_LOCK:
+            DOWNLOAD_STATE["error"] = "Thiếu binary: " + "; ".join(errors)
+    else:
+        logger.info("All missing binaries verified in %s", target_dir)
+    return errors
 
 
 def get_models_cache_dir() -> Path:
@@ -222,11 +253,12 @@ def check_models_installed() -> dict[str, Any]:
     }
 
 
-def download_all_models_sync(progress_cb: Callable[[dict], None] | None = None) -> None:
+def download_all_models_sync(progress_cb: Callable[[dict], None] | None = None,
+                             already_marked: bool = False) -> None:
     """Tải lần lượt toàn bộ 3 model từ ModelScope về app models_cache."""
     global DOWNLOAD_STATE
     with _DOWNLOAD_LOCK:
-        if DOWNLOAD_STATE["is_downloading"]:
+        if DOWNLOAD_STATE["is_downloading"] and not already_marked:
             return
         DOWNLOAD_STATE.update({
             "is_downloading": True,

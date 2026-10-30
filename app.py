@@ -317,19 +317,36 @@ async def api_models_status():
 @app.post("/api/models/download")
 async def api_models_download():
     """Kích hoạt tải Model AI & Binaries nền về %APPDATA%/SeverDesktop/."""
-    from core.models import download_all_models_sync, download_missing_binaries, check_binaries_installed, DOWNLOAD_STATE
+    from core.models import (
+        download_all_models_sync,
+        download_missing_binaries,
+        check_binaries_installed,
+        check_models_installed,
+        DOWNLOAD_STATE,
+    )
     if DOWNLOAD_STATE["is_downloading"]:
         return {"status": "ok", "message": "Đang tải", "downloading": True}
 
     def _bg_download():
+        DOWNLOAD_STATE["error"] = ""
+        DOWNLOAD_STATE["is_downloading"] = True
+        DOWNLOAD_STATE["current_model"] = "Kiểm tra dữ liệu..."
         try:
             # 1. Tải Binaries trước nếu thiếu (nhanh, ~100-200MB)
             if not check_binaries_installed()["ready"]:
-                download_missing_binaries()
-            # 2. Tải STT Models
-            download_all_models_sync()
+                errors = download_missing_binaries()
+                if errors:
+                    logger.warning("Binary download incomplete: %s", errors)
+            # 2. Tải STT Models (bỏ qua nếu đã đủ)
+            if not check_models_installed()["ready"]:
+                download_all_models_sync(already_marked=True)
         except Exception as exc:
             logger.error("Background AI model/binaries download failed: %s", exc)
+            DOWNLOAD_STATE["error"] = f"Tải dữ liệu lỗi: {exc}"
+        finally:
+            DOWNLOAD_STATE["is_downloading"] = False
+            if not DOWNLOAD_STATE["error"]:
+                DOWNLOAD_STATE["current_model"] = "Hoàn tất"
 
     threading.Thread(target=_bg_download, daemon=True, name="model-downloader").start()
     return {"status": "ok", "message": "Bắt đầu tải", "downloading": True}
@@ -763,6 +780,36 @@ async def api_tiktok_delete_account(sessionid: str = ""):
         return JSONResponse({"error": "Thiếu sessionid"}, 400)
     tiktok.delete_account(sessionid)
     return {"status": "ok", "message": "Đã xóa tài khoản"}
+
+
+# ── Google (Gemini) Login ────────────────────────────────────────
+
+@app.get("/api/google/accounts")
+async def api_google_accounts():
+    from core import google_auth
+    return {"status": "ok", "accounts": google_auth.public_list()}
+
+
+@app.post("/api/google/open-browser")
+async def api_google_open_browser(payload: dict = None):
+    """Mở trình duyệt cho user đăng nhập Google; cookie + token tự lưu rồi browser tự đóng."""
+    import threading
+    from core import google_auth
+
+    threading.Thread(
+        target=lambda: google_auth.login_blocking(),
+        daemon=True, name="google-login",
+    ).start()
+    return {"status": "ok", "message": "Đã mở trình duyệt. Đăng nhập xong app tự lấy cookie/token và đóng cửa sổ."}
+
+
+@app.delete("/api/google/account")
+async def api_google_delete_account(id: str = ""):
+    from core import google_auth
+    if not id:
+        return JSONResponse({"error": "Thiếu id tài khoản"}, 400)
+    google_auth.delete_account(id)
+    return {"status": "ok", "message": "Đã xóa tài khoản Google"}
 
 
 # ── Bilibili Login ───────────────────────────────────────────────

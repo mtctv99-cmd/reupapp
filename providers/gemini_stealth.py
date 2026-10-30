@@ -79,7 +79,25 @@ async def gemini_translate(
         return None
 
 
-def _gemini_request_sync(prompt: str, mode: int, think: int, timeout: int = 60) -> str:
+def _account_cookie_header() -> str:
+    """Cookie của tài khoản Google đã thêm (nếu có) — tăng hạn mức so với guest."""
+    try:
+        from core.google_auth import list_accounts
+    except Exception:
+        return ""
+    for acc in list_accounts():
+        parts = [
+            f"{c.get('name')}={c.get('value')}"
+            for c in (acc.get("cookies") or [])
+            if c.get("name") and c.get("value")
+        ]
+        if parts:
+            return "; ".join(parts)
+    return ""
+
+
+def _gemini_request_sync(prompt: str, mode: int, think: int, timeout: int = 60,
+                         use_cookie: bool = True) -> str:
     """Gửi request đến Gemini StreamGenerate — đồng bộ (dùng trong thread)."""
     inner = [None] * 80
     inner[0] = [prompt, 0, None, None, None, None, 0]
@@ -117,6 +135,9 @@ def _gemini_request_sync(prompt: str, mode: int, think: int, timeout: int = 60) 
         "X-Same-Domain": "1",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     }
+    cookie_header = _account_cookie_header() if use_cookie else ""
+    if cookie_header:
+        headers["Cookie"] = cookie_header
 
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
@@ -136,6 +157,10 @@ def _gemini_request_sync(prompt: str, mode: int, think: int, timeout: int = 60) 
             if attempt < 2:
                 time.sleep(2 ** attempt)
 
+    if cookie_header:
+        # Cookie tài khoản lỗi/hết hạn thì thử lại bằng guest
+        logger.warning("gemini_stealth: cookie account failed (%s), retry as guest", last_err)
+        return _gemini_request_sync(prompt, mode, think, timeout, use_cookie=False)
     raise last_err or RuntimeError("gemini stealth failed")
 
 

@@ -22,3 +22,7 @@ output/
 *.jpeg
 bin/
 test_normal/
+models/
+.v2c/
+*.log
+

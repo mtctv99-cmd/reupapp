@@ -91,17 +91,20 @@ def _show_error_box(title: str, message: str) -> None:
 
 
 def _suppress_stdio():
-    """Suppress stdio ONLY when running frozen/packaged EXE without console."""
+    """Suppress stdio ONLY when running frozen/packaged EXE without console.
+
+    Handle stdout/stderr có thể tồn tại nhưng là handle hỏng (tqdm ghi vào → OSError 22).
+    Luôn thay bằng devnull khi frozen để mọi thư viện ghi log an toàn.
+    """
     if not getattr(sys, 'frozen', False):
         return
-    class _Null:
-        def write(self, _): pass
-        def flush(self): pass
-        def isatty(self): return False
-    if sys.stdout is None:
-        sys.stdout = _Null()
-    if sys.stderr is None:
-        sys.stderr = _Null()
+    import io
+    try:
+        _devnull = open(os.devnull, 'w', encoding='utf-8', errors='ignore')
+    except Exception:
+        _devnull = io.StringIO()
+    sys.stdout = _devnull
+    sys.stderr = _devnull
 
 
 def _kill_stale_process_on_port(port):

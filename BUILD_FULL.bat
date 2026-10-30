@@ -39,7 +39,7 @@ if "%ISCC_PATH%"=="" (
     exit /b 1
 )
 
-"%ISCC_PATH%" /DMyAppVersion=0.2.1 /DOutputBaseFilename=SeverDubStudioPro_Full_Offline_Setup_v0.2.1 installer.iss
+"%ISCC_PATH%" /DMyAppVersion=0.2.2 /DOutputBaseFilename=SeverDubStudioPro_Full_Offline_Setup_v0.2.2 installer.iss
 
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Inno Setup Compilation failed!
@@ -49,6 +49,6 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo ========================================================
 echo   BUILD FULL OFFLINE SUCCESS!
-echo   Setup File: dist\SeverDubStudioPro_Full_Offline_Setup_v0.2.1.exe
+echo   Setup File: dist\SeverDubStudioPro_Full_Offline_Setup_v0.2.2.exe
 echo ========================================================
 pause
