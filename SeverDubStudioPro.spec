@@ -60,8 +60,15 @@ if not _NO_BIN:
 
 # ── Piper TTS Data & Local Voice Models ──
 _piper_datas = collect_data_files('piper')
-if os.path.exists('models/piper'):
+_voice_onnx = os.path.join('models', 'piper', 'ngoc_huyen', 'ngoc_huyen.onnx')
+_voice_json = os.path.join('models', 'piper', 'ngoc_huyen', 'ngoc_huyen.onnx.json')
+if os.path.exists(_voice_onnx) and os.path.exists(_voice_json):
     _piper_datas.append(('models/piper', 'models/piper'))
+elif os.environ.get('BUILD_LITE', '0') != '1':
+    raise SystemExit(
+        "Thiếu models/piper/ngoc_huyen/ngoc_huyen.onnx(.json) — bản FULL phải nhúng voice train sẵn.\n"
+        "Tải 2 file vào models/piper/ngoc_huyen/ rồi build lại."
+    )
 
 _piper_submodules = [s for s in collect_submodules('piper') if not s.startswith('piper.train')]
 

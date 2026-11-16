@@ -354,13 +354,6 @@ def _parse_translate_response(content: str, original: list[str]) -> list[str] | 
     return None
 
 _RATE_LIMIT_STATUSES = frozenset({429, 402, 403})
-_TIER_COOLDOWNS: dict[str, float] = {}
-
-def _is_tier_cooling(tier_name: str) -> bool:
-    return False
-
-def _start_tier_cooldown(tier_name: str, duration: int = 60) -> None:
-    pass
 
 async def _translate_openai(
     texts: list[str], url: str, api_key: str, model: str,
@@ -414,13 +407,10 @@ async def _translate_openai(
 
         last_err = None
         for attempt in range(2):
-            if _is_tier_cooling(f"openai:{model}"):
-                return None
             try:
                 async with httpx.AsyncClient(timeout=25, verify=False) as client:
                     resp = await client.post(endpoint, json=payload, headers=headers)
                     if resp.status_code in _RATE_LIMIT_STATUSES:
-                        _start_tier_cooldown(f"openai:{model}", duration=120)
                         return None
                     if resp.status_code >= 400:
                         last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
@@ -480,64 +470,6 @@ async def _translate_google(texts: list[str], source_lang: str, target_lang: str
         logger.warning("translate google fail: %s", exc)
         return None
 
-async def _translate_claude(texts: list[str], api_key: str,
-                             source_lang: str, target_lang: str) -> list[str] | None:
-    """Claude API translate."""
-    if not api_key:
-        logger.warning("translate claude: no API key")
-        return None
-    import httpx
-    try:
-        batch_size = 50
-        result = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            prompt = _base_segment_prompt(source_lang, target_lang) + json.dumps(
-                [{"index": j, "text": t} for j, t in enumerate(batch)], ensure_ascii=False)
-            resp = httpx.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-                json={
-                    "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 4096,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=60,
-            )
-            resp.raise_for_status()
-            content = resp.json()["content"][0]["text"]
-            translated = _parse_translate_response(content, batch)
-            if translated is None:
-                return None
-            result.extend(translated)
-        return result
-    except Exception as exc:
-        logger.warning("translate claude fail: %s", exc)
-        return None
-
-async def _translate_sever(texts: list[str], url: str, api_key: str,
-                            source_lang: str, target_lang: str) -> list[str] | None:
-    """Call sever translate endpoint."""
-    import httpx
-    if not url:
-        return None
-    url = url.rstrip("/")
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["X-API-Key"] = api_key
-    payload = {"texts": texts, "source_language": source_lang, "target_language": target_lang}
-    try:
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(f"{url}/api/v2/translate", json=payload, headers=headers)
-            if resp.status_code == 404:
-                resp = await client.post(f"{url}/translate", json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-        return data if isinstance(data, list) else (data.get("translations") or data.get("texts") or texts)
-    except Exception as exc:
-        logger.warning("translate sever fail: %s", exc)
-        return None
-
 def _validate_translation(texts: list[str], translated: list[str], target_lang: str) -> bool:
     """Validate translation quality and consistency.
 
@@ -578,10 +510,10 @@ async def _call_tier_provider(
     history: list[dict] | None = None, context: str | None = None,
 ) -> list[str] | None:
     tp = settings.get("translate_provider", {})
-    provider = tier.get("provider") or tp.get("provider") or "openai"
+    provider = tier.get("provider") or tp.get("provider") or "gemini_stealth"
     url = tier.get("url") or tp.get("url", "")
     api_key = tier.get("api_key") or tp.get("api_key", "")
-    model = tier.get("model") or "gemini-3.8-flash"
+    model = tier.get("model") or "gemini-flash-lite"
 
     if provider == "gemini_stealth":
         from providers.gemini_stealth import gemini_translate
@@ -590,24 +522,6 @@ async def _call_tier_provider(
             system_prompt=_base_segment_prompt(source_lang, target_lang),
             history=history, context=context,
         )
-        if res is not None and len(res) != len(texts):
-            res = _align_translated_length(res, len(texts))
-        return res if res and _validate_translation(texts, res, target_lang) else None
-
-    if provider == "google":
-        res = await _translate_google(texts, source_lang, target_lang)
-        if res is not None and len(res) != len(texts):
-            res = _align_translated_length(res, len(texts))
-        return res if res and _validate_translation(texts, res, target_lang) else None
-
-    if provider == "claude":
-        res = await _translate_claude(texts, api_key, source_lang, target_lang)
-        if res is not None and len(res) != len(texts):
-            res = _align_translated_length(res, len(texts))
-        return res if res and _validate_translation(texts, res, target_lang) else None
-
-    if provider == "sever":
-        res = await _translate_sever(texts, url, api_key, source_lang, target_lang)
         if res is not None and len(res) != len(texts):
             res = _align_translated_length(res, len(texts))
         return res if res and _validate_translation(texts, res, target_lang) else None
@@ -772,8 +686,6 @@ async def _translate_funnel(texts: list[str], pending_idx: list[int],
         if not pending_idx:
             break
         tier_name = str(tier.get("provider") or "?")
-        if _is_tier_cooling(f"tier:{tier_name}:{tier.get('model', '')}"):
-            continue
         logger.info("translate tier %d/%d: %s -> %s (pending %d)",
                     idx + 1, len(tiers), tier.get("label", tier_name),
                     SUPPORTED_LANGUAGES.get(target_lang, target_lang), len(pending_idx))
@@ -786,7 +698,6 @@ async def _translate_funnel(texts: list[str], pending_idx: list[int],
             )
         except Exception as exc:
             logger.warning("translate tier %d fail: %s", idx + 1, exc)
-            _start_tier_cooldown(f"tier:{tier_name}:{tier.get('model', '')}", duration=60)
             continue
 
         if translated is None or len(translated) != len(pending_texts):

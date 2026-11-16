@@ -66,6 +66,7 @@ class PipelineOrchestrator:
             for idx, name, fn, weight in self._steps:
                 if self.cancel_event.is_set():
                     update_job(self.job_id, status="cancelled")
+                    self._cleanup_all_temp_files()
                     return {"job_id": self.job_id, "status": "cancelled"}
                 update_job(self.job_id, current_stage=name)
                 await self._progress(idx, name, 0)

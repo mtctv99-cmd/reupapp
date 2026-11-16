@@ -486,29 +486,7 @@ async def api_jobs_create(payload: dict):
     job_id = create_job(url, title=placeholder_title, source_lang=source_lang, target_lang=target_lang, settings_override=job_settings)
     _QUEUE_TRIGGER.set()
 
-    # Nếu chưa có tiêu đề, chạy background task ngầm tự cập nhật tiêu đề không chặn UI
-    if not title:
-        async def _bg_fetch_title(jid: str, vurl: str, slang: str, tlang: str):
-            try:
-                from pipeline.step01_download import _fetch_title_ytdlp
-                from pipeline.step05_translate import translate_tier
-                from core.db import update_job
-                raw_title = await _fetch_title_ytdlp(vurl)
-                if raw_title:
-                    if "\n" in raw_title:
-                        lines = [ln.strip() for ln in raw_title.split("\n") if ln.strip() and not ln.strip().lower().startswith("p0")]
-                        raw_title = lines[0] if lines else raw_title.split("\n")[0]
-                    v_title = raw_title
-                    tiers = settings.get_translate_tiers()
-                    if tiers and slang != tlang:
-                        res = await translate_tier([raw_title], tiers[0], slang, tlang)
-                        if res and res[0]:
-                            v_title = res[0].strip()
-                    update_job(jid, title=v_title)
-            except Exception as exc:
-                logger.debug("Background title fetch: %s", exc)
-
-        asyncio.create_task(_bg_fetch_title(job_id, url, source_lang, target_lang))
+    # Tiêu đề thật do orchestrator lấy + dịch ở bước 1 (tránh dịch 2 lần)
 
     with _STATUS_LOCK:
         is_running = PIPELINE_STATUS["running"]

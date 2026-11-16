@@ -42,6 +42,11 @@ class TikTokRateLimited(RuntimeError):
     pass
 
 
+class TikTokAuthError(RuntimeError):
+    """Session sai/hết hạn — retry thêm không có ích."""
+    pass
+
+
 # ── Accounts ─────────────────────────────────────────────────────
 
 def list_accounts() -> list[dict]:
@@ -263,6 +268,12 @@ async def _request_part(client: httpx.AsyncClient, text: str, voice_id: str) -> 
             logger.warning("TikTok session %s... bị rate limit, nghỉ %.0fs", session_id[:6], COOLDOWN_SEC)
         except Exception as exc:
             last_err = exc
+            # "Couldn't load speech" = session sai/hết hạn; 1 tk thì retry vô ích
+            if "load speech" in str(exc).lower() and len(ids) <= 1:
+                raise TikTokAuthError(
+                    "TikTok/CapCut session không hợp lệ hoặc đã hết hạn. "
+                    "Vào Cài đặt → CapCut TTS để đăng nhập lại."
+                ) from exc
             logger.warning("TikTok TTS attempt %d thất bại: %s", attempt + 1, exc)
         await asyncio.sleep(0.5)
     raise RuntimeError(f"TikTok TTS thất bại sau {attempts} lần: {last_err}")

@@ -236,6 +236,15 @@ async def run_tts(text: str, voice: str = "", max_retries: int = 2, speed: float
                     res = await tiktok.generate(text, v_norm, out.name)
                     if res and os.path.exists(res) and os.path.getsize(res) > 200:
                         return await _apply_tts_speed(res, speed)
+                except tiktok.TikTokAuthError as exc:
+                    last_error = exc
+                    logger.error("CapCut session invalid: %s", exc)
+                    if os.path.exists(out.name):
+                        try:
+                            os.remove(out.name)
+                        except OSError:
+                            pass
+                    raise
                 except Exception as exc:
                     last_error = exc
                     logger.warning("Local TikTok TTS attempt %d/%d failed: %s", attempt + 1, max_retries, exc)

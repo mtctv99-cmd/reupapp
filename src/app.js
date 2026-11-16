@@ -457,6 +457,7 @@ async function loadTiktokAccounts() {
   const box = document.getElementById("tiktok-accounts-list");
   if (!box) return;
   const res = await apiFetch("/tiktok/login-status");
+  applyTiktokSessionState(!!res?.has_session, true);
   const accounts = res?.accounts || [];
   if (!accounts.length) {
     box.innerHTML = '<p class="text-sub">Chưa có tài khoản nào.</p>';
@@ -478,6 +479,35 @@ async function loadTiktokAccounts() {
     row.append(label, btn);
     box.appendChild(row);
   });
+}
+
+// ── CapCut voice availability (cần session TikTok/CapCut) ──────
+const CAPCUT_VOICES = ["BV074_streaming", "BV001_streaming"];
+let hasTiktokSession = false;
+
+function applyTiktokSessionState(hasSession, notify = false) {
+  hasTiktokSession = !!hasSession;
+  selectVoice?.querySelectorAll('option[value^="BV"]').forEach((opt) => {
+    if (!opt.dataset.baseLabel) opt.dataset.baseLabel = opt.textContent;
+    opt.disabled = !hasTiktokSession;
+    opt.textContent = hasTiktokSession ? opt.dataset.baseLabel : `${opt.dataset.baseLabel} (cần đăng nhập)`;
+  });
+  if (!hasTiktokSession && selectVoice && CAPCUT_VOICES.includes(selectVoice.value)) {
+    selectVoice.value = "ngoc_huyen";
+    currentSettings.voice = "ngoc_huyen";
+    apiFetch("/settings", { method: "POST", body: JSON.stringify({ voice: "ngoc_huyen" }) });
+    const msg = "Chưa đăng nhập CapCut nên không dùng được giọng CapCut. Đã chuyển về Ngọc Huyền. Vào Cài đặt → CapCut TTS → Thêm tài khoản để dùng giọng CapCut.";
+    notify ? showErrorModal(msg) : showToast(msg, "info", 6000, "info");
+  }
+}
+
+async function refreshTiktokSession(notify = false) {
+  try {
+    const res = await apiFetch("/tiktok/login-status");
+    applyTiktokSessionState(!!res?.has_session, notify);
+  } catch (e) {
+    console.debug("TikTok session check failed:", e);
+  }
 }
 
 // ── Google (Gemini) accounts ─────────────────────────────────
@@ -988,6 +1018,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Voice select change
   selectVoice?.addEventListener("change", async () => {
+    if (CAPCUT_VOICES.includes(selectVoice.value) && !hasTiktokSession) {
+      selectVoice.value = "ngoc_huyen";
+      showErrorModal("Giọng CapCut cần đăng nhập tài khoản CapCut. Chọn giọng Ngọc Huyền hoặc vào Cài đặt → CapCut TTS để đăng nhập.");
+      return;
+    }
     currentSettings.voice = selectVoice.value;
     await apiFetch("/settings", { method: "POST", body: JSON.stringify({ voice: selectVoice.value }) });
   });
@@ -1185,6 +1220,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Khởi động kiểm tra Model AI & Update khi mở app
   setTimeout(checkModelStatus, 1500);
   setTimeout(checkForUpdates, 3000);
+  refreshTiktokSession();
 
   setInterval(loadJobs, 5000);
 });
