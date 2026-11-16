@@ -542,6 +542,8 @@ async def api_jobs_output(id: str = ""):
                 # Tìm đúng file mp4 chứa ID của job này
                 matched_id = glob.glob(os.path.join(out_dir, f"*{id}*.mp4"))
                 if matched_id:
+                    # Có thể còn bản gốc + bản _speed: lấy file mới nhất
+                    matched_id.sort(key=os.path.getmtime, reverse=True)
                     result["output_path"] = matched_id[0]
                     result["exists"] = True
                 else:

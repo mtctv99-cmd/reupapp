@@ -35,7 +35,13 @@ async def final_concat(chunk_paths: list[str], output_dir: str, job_id: str,
     if final_speed and abs(final_speed - 1.0) > 0.01:
         from pipeline.step01_download import _apply_speed
         logger.info("Applying final output speed adjustment x%.2f to %s", final_speed, output_path)
-        output_path = await _apply_speed(output_path, final_speed)
+        sped = await _apply_speed(output_path, final_speed)
+        if sped != output_path:
+            try:
+                os.remove(output_path)  # tránh còn 2 bản (gốc + speed) gây nhầm khi mở output
+            except OSError:
+                pass
+            output_path = sped
 
     # Probe result
     from core.ffmpeg import get_duration
