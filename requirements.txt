@@ -1,4 +1,5 @@
 fastapi
+python-multipart
 uvicorn
 httpx
 pywebview
@@ -6,13 +7,18 @@ Pillow
 pydub
 yt-dlp
 rapidocr-onnxruntime
+opencv-python
+numpy
+tqdm
+packaging
 
 # STT local
-funasr
+funasr>=1.3.29,<2
 modelscope
 torch
+kaldi-native-fbank
 
-# TTS local (Piper) + phụ đề
+# TTS local (Piper)
 piper-tts
 onnxruntime
 

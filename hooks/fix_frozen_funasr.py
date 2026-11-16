@@ -64,7 +64,6 @@ if _IS_FROZEN:
         os.environ.setdefault("MODELSCOPE_CACHE", str(_app_data_cache))
         os.environ.setdefault("HUB_CACHE", str(_app_data_cache))
 
-    _orig_getsource = inspect.getsource
     _orig_getfile = inspect.getfile
     _orig_getsourcelines = inspect.getsourcelines
     _orig_findsource = inspect.findsource
@@ -73,13 +72,15 @@ if _IS_FROZEN:
         try:
             return _orig_findsource(obj)
         except (OSError, TypeError):
-            return (["<frozen>"], 0)
+            return ([], 0)
 
     def _safe_getsourcelines(obj):
+        # Trả list rỗng (không phải chuỗi giả): inspect.getsource() sẽ trả ""
+        # -> compile("") hợp lệ, anyio 4.x fallback import eager thay vì SyntaxError.
         try:
             return _orig_getsourcelines(obj)
         except (OSError, TypeError):
-            return (["<frozen>"], 0)
+            return ([], 0)
 
     def _safe_getfile(obj):
         try:
@@ -87,13 +88,9 @@ if _IS_FROZEN:
         except (OSError, TypeError):
             return "<frozen>"
 
-    def _safe_getsource(obj):
-        try:
-            return _orig_getsource(obj)
-        except (OSError, TypeError):
-            return "<frozen source>"
-
+    # Giữ nguyên inspect.getsource: anyio 4.x dùng nó để build lazy map.
+    # Trả chuỗi giả sẽ làm compile() lỗi SyntaxError; để OSError nguyên bản
+    # thì anyio tự fallback import eager.
     inspect.findsource = _safe_findsource
     inspect.getsourcelines = _safe_getsourcelines
     inspect.getfile = _safe_getfile
-    inspect.getsource = _safe_getsource

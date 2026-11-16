@@ -6,7 +6,16 @@ echo   (Tach Model AI de file sieu nhe ~300MB)
 echo ========================================
 
 set BUILD_LITE=1
-pyinstaller SeverDubStudioPro.spec --clean --noconfirm
+if not exist ".venv\Scripts\python.exe" (
+    echo [ERROR] Chua co .venv. Chay setup.bat truoc.
+    pause
+    exit /b 1
+)
+set "PY=.venv\Scripts\python.exe"
+"%PY%" -m PyInstaller --version >nul 2>&1
+if errorlevel 1 "%PY%" -m pip install pyinstaller
+
+"%PY%" -m PyInstaller SeverDubStudioPro.spec --clean --noconfirm
 
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Build failed!

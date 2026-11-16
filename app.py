@@ -298,17 +298,20 @@ async def api_check_update():
 @app.get("/api/models/status")
 async def api_models_status():
     """Kiểm tra trạng thái Model AI và Binaries trên máy."""
-    from core.models import check_models_installed, check_binaries_installed, DOWNLOAD_STATE
+    from core.models import check_models_installed, check_binaries_installed, check_piper_installed, DOWNLOAD_STATE
     installed = check_models_installed()
     bins = check_binaries_installed()
+    piper = check_piper_installed()
     return {
         "status": "ok",
-        "ready": installed["ready"] and bins["ready"],
+        "ready": installed["ready"] and bins["ready"] and piper["ready"],
         "models_ready": installed["ready"],
         "binaries_ready": bins["ready"],
+        "piper_ready": piper["ready"],
         "location": installed.get("location", ""),
         "missing": installed.get("missing", []),
         "missing_binaries": bins.get("missing", []),
+        "missing_piper": piper.get("missing", []),
         "downloading": DOWNLOAD_STATE["is_downloading"],
         "progress": DOWNLOAD_STATE["progress"],
     }
@@ -320,8 +323,10 @@ async def api_models_download():
     from core.models import (
         download_all_models_sync,
         download_missing_binaries,
+        download_missing_piper,
         check_binaries_installed,
         check_models_installed,
+        check_piper_installed,
         DOWNLOAD_STATE,
     )
     if DOWNLOAD_STATE["is_downloading"]:
@@ -337,7 +342,14 @@ async def api_models_download():
                 errors = download_missing_binaries()
                 if errors:
                     logger.warning("Binary download incomplete: %s", errors)
-            # 2. Tải STT Models (bỏ qua nếu đã đủ)
+            DOWNLOAD_STATE["progress"] = max(DOWNLOAD_STATE["progress"], 0.05)
+            # 2. Tải Piper voice (~63MB)
+            if not check_piper_installed()["ready"]:
+                perr = download_missing_piper()
+                if perr:
+                    logger.warning("Piper voice download incomplete: %s", perr)
+            DOWNLOAD_STATE["progress"] = max(DOWNLOAD_STATE["progress"], 0.10)
+            # 3. Tải STT Models (bỏ qua nếu đã đủ)
             if not check_models_installed()["ready"]:
                 download_all_models_sync(already_marked=True)
         except Exception as exc:
@@ -347,6 +359,9 @@ async def api_models_download():
             DOWNLOAD_STATE["is_downloading"] = False
             if not DOWNLOAD_STATE["error"]:
                 DOWNLOAD_STATE["current_model"] = "Hoàn tất"
+                if (check_models_installed()["ready"] and check_binaries_installed()["ready"]
+                        and check_piper_installed()["ready"]):
+                    DOWNLOAD_STATE["progress"] = 1.0
 
     threading.Thread(target=_bg_download, daemon=True, name="model-downloader").start()
     return {"status": "ok", "message": "Bắt đầu tải", "downloading": True}

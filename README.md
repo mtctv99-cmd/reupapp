@@ -14,25 +14,31 @@
 
 ## Yêu cầu
 
-- Python 3.11+
-- FFmpeg / ffprobe / yt-dlp / BBDown (bản build full đã kèm sẵn trong `bin/`)
+- Windows 10/11 + Python 3.10–3.12 ([tải tại đây](https://www.python.org/downloads/), nhớ tick *Add python.exe to PATH*)
+- Microsoft Edge hoặc Google Chrome (dùng cho đăng nhập CapCut/Google; thiếu thì setup tự cài Chromium)
+- FFmpeg / ffprobe / yt-dlp / BBDown — app tự tải ở lần chạy đầu
+- Model AI FunASR (~2 GB) + giọng Piper `ngoc_huyen` (~63 MB) — app tự tải ở lần chạy đầu
 
 ## Cài đặt
 
-```bash
-pip install -r requirements.txt
+```bat
+setup.bat
 ```
+
+Tạo `.venv`, cài toàn bộ thư viện trong `requirements.txt`, kiểm tra import và trình duyệt cho Playwright.
 
 ## Chạy
 
-```bash
-python run.py          # mở cửa sổ desktop
+```bat
+run.bat
 ```
+
+`run.bat` tự gọi `setup.bat` nếu chưa có `.venv` hoặc thiếu thư viện.
 
 Hoặc chạy riêng backend để mở bằng trình duyệt:
 
 ```bash
-python -m uvicorn app:app --host 127.0.0.1 --port 15577
+.venv\Scripts\python -m uvicorn app:app --host 127.0.0.1 --port 15577
 # http://127.0.0.1:15577
 ```
 

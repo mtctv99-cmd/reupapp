@@ -83,6 +83,10 @@ a = Analysis(
         'rapidocr_onnxruntime', 'onnxruntime',
         # FunASR + torch
         'funasr', 'modelscope', 'torch',
+        # fbank backend (funasr mới không kèm torchaudio)
+        'kaldi_native_fbank',
+        # FastAPI form upload
+        'python_multipart', 'multipart',
         # Audio processing
         'pydub', 'pydub.silence',
         # TTS

@@ -65,6 +65,16 @@ def get_piper_voice(voice_name: str = "ngoc_huyen"):
             return _PIPER_VOICES[voice_name]
         paths = resolve_piper_model(voice_name)
         if not paths:
+            # Model chưa có (máy mới): tự tải từ GitHub Release rồi thử lại
+            try:
+                from core.models import check_piper_installed, download_missing_piper
+                if not check_piper_installed()["ready"]:
+                    logger.info("Piper voice missing — downloading…")
+                    download_missing_piper()
+                paths = resolve_piper_model(voice_name)
+            except Exception as exc:
+                logger.warning("Auto-download Piper voice failed: %s", exc)
+        if not paths:
             return None
         model_path, config_path = paths
         try:

@@ -8,7 +8,19 @@ echo ========================================================
 set BUILD_LITE=0
 set NO_BIN=0
 
-pyinstaller SeverDubStudioPro.spec --clean --noconfirm
+if not exist ".venv\Scripts\python.exe" (
+    echo [ERROR] Chua co .venv. Chay setup.bat truoc.
+    pause
+    exit /b 1
+)
+set "PY=.venv\Scripts\python.exe"
+"%PY%" -m PyInstaller --version >nul 2>&1
+if errorlevel 1 (
+    echo [*] Cai PyInstaller...
+    "%PY%" -m pip install pyinstaller
+)
+
+"%PY%" -m PyInstaller SeverDubStudioPro.spec --clean --noconfirm
 
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] PyInstaller Build failed!
@@ -19,7 +31,7 @@ if %ERRORLEVEL% NEQ 0 (
 echo ========================================================
 echo   Cleaning deeply nested licenses to prevent MAX_PATH...
 echo ========================================================
-python -c "import shutil, os; [shutil.rmtree(os.path.join(r, d), ignore_errors=True) for r, ds, fs in os.walk(r'dist\SeverDubStudioPro') for d in ds if 'licenses' in d.lower()]"
+"%PY%" -c "import shutil, os; [shutil.rmtree(os.path.join(r, d), ignore_errors=True) for r, ds, fs in os.walk(r'dist\SeverDubStudioPro') for d in ds if 'licenses' in d.lower()]"
 
 echo ========================================================
 echo   Compiling Inno Setup (Setup_Full_Offline.exe)...
@@ -39,7 +51,7 @@ if "%ISCC_PATH%"=="" (
     exit /b 1
 )
 
-"%ISCC_PATH%" /DMyAppVersion=0.2.2 /DOutputBaseFilename=SeverDubStudioPro_Full_Offline_Setup_v0.2.2 installer.iss
+"%ISCC_PATH%" /DMyAppVersion=0.2.3 /DOutputBaseFilename=SeverDubStudioPro_Full_Offline_Setup_v0.2.3 installer.iss
 
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Inno Setup Compilation failed!
@@ -49,6 +61,6 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo ========================================================
 echo   BUILD FULL OFFLINE SUCCESS!
-echo   Setup File: dist\SeverDubStudioPro_Full_Offline_Setup_v0.2.2.exe
+echo   Setup File: dist\SeverDubStudioPro_Full_Offline_Setup_v0.2.3.exe
 echo ========================================================
 pause

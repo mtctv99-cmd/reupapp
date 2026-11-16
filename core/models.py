@@ -63,6 +63,94 @@ BINARIES_CONFIG = [
     },
 ]
 
+# ── Piper TTS voice (tải từ GitHub Release của app) ──
+PIPER_VOICE = "ngoc_huyen"
+PIPER_FILES = [
+    {
+        "name": "ngoc_huyen.onnx",
+        "url": "https://github.com/mtctv99-cmd/reupapp/releases/download/v0.2.2/ngoc_huyen.onnx",
+        "min_bytes": 1_000_000,
+    },
+    {
+        "name": "ngoc_huyen.onnx.json",
+        "url": "https://github.com/mtctv99-cmd/reupapp/releases/download/v0.2.2/ngoc_huyen.onnx.json",
+        "min_bytes": 200,
+    },
+]
+
+
+def get_piper_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        meipass = Path(getattr(sys, "_MEIPASS", ""))
+        for cand in (meipass / "models" / "piper" / PIPER_VOICE,
+                     meipass / "_internal" / "models" / "piper" / PIPER_VOICE):
+            if cand.exists():
+                return cand
+    return app_dir() / "models" / "piper" / PIPER_VOICE
+
+
+def _piper_candidate_dirs() -> list[Path]:
+    """Các nơi có thể chứa voice: APPDATA, bundle PyInstaller, thư mục mã nguồn."""
+    cands: list[Path] = [app_dir() / "models" / "piper" / PIPER_VOICE]
+    if getattr(sys, "frozen", False):
+        meipass = Path(getattr(sys, "_MEIPASS", ""))
+        exe_dir = Path(sys.executable).parent
+        cands += [
+            meipass / "models" / "piper" / PIPER_VOICE,
+            meipass / "_internal" / "models" / "piper" / PIPER_VOICE,
+            exe_dir / "models" / "piper" / PIPER_VOICE,
+            exe_dir / "_internal" / "models" / "piper" / PIPER_VOICE,
+        ]
+    cands.append(Path(__file__).parent.parent / "models" / "piper" / PIPER_VOICE)
+    return cands
+
+
+def check_piper_installed() -> dict[str, Any]:
+    missing = [f["name"] for f in PIPER_FILES]
+    for d in _piper_candidate_dirs():
+        if all((d / f["name"]).exists() and (d / f["name"]).stat().st_size >= f["min_bytes"]
+               for f in PIPER_FILES):
+            return {"ready": True, "missing": [], "location": str(d)}
+    return {"ready": False, "missing": missing, "location": ""}
+
+
+def download_missing_piper(progress_cb: Callable[[str], None] | None = None) -> list[str]:
+    """Tải voice Piper còn thiếu (~63 MB) từ GitHub Release. Trả về danh sách lỗi."""
+    target = get_piper_dir()
+    target.mkdir(parents=True, exist_ok=True)
+    errors: list[str] = []
+
+    for item in PIPER_FILES:
+        dest = target / item["name"]
+        if dest.exists() and dest.stat().st_size >= item["min_bytes"]:
+            continue
+
+        msg = f"Đang tải {item['name']}..."
+        if progress_cb:
+            progress_cb(msg)
+        with _DOWNLOAD_LOCK:
+            DOWNLOAD_STATE["current_model"] = msg
+        logger.info("Downloading Piper asset %s", item["url"])
+
+        tmp = dest.with_name(dest.name + ".part")
+        try:
+            urllib.request.urlretrieve(item["url"], str(tmp))
+            tmp.replace(dest)
+        except Exception as exc:
+            logger.warning("Piper asset %s failed: %s", item["name"], exc)
+            errors.append(f"{item['name']}: {exc}")
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+
+    if errors:
+        with _DOWNLOAD_LOCK:
+            DOWNLOAD_STATE["error"] = "Thiếu Piper voice: " + "; ".join(errors)
+    return errors
+
+
 DOWNLOAD_STATE = {
     "is_downloading": False,
     "current_model": "",
