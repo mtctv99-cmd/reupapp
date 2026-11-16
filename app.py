@@ -28,6 +28,41 @@ logger = logging.getLogger("sever")
 
 app = FastAPI(title="Sever Dub Studio Pro")
 
+
+def _prune_stale_output_dirs(max_age_sec: int = 86400) -> None:
+    """Dọn thư mục job cũ trong output: giữ file cuối (mp4/json), xoá rác chunk/overlay."""
+    import shutil
+    out = settings.get("output_dir", "")
+    if not out or not os.path.isdir(out):
+        return
+    now = time.time()
+    for name in os.listdir(out):
+        job_dir = os.path.join(out, name)
+        if not (os.path.isdir(job_dir) and re.fullmatch(r"[0-9a-f]{8}", name)):
+            continue
+        try:
+            if now - os.path.getmtime(job_dir) < max_age_sec:
+                continue  # job đang chạy hoặc mới xong
+            for f in os.listdir(job_dir):
+                if not f.endswith((".mp4", ".json")) or "_ch" in f or "_overlay" in f:
+                    continue
+                src, dst = os.path.join(job_dir, f), os.path.join(out, f)
+                if os.path.exists(dst):
+                    continue
+                shutil.move(src, dst)
+                if f.endswith(".json"):
+                    try:
+                        m = json.loads(Path(dst).read_text("utf-8"))
+                        if m.get("output_path"):
+                            m["output_path"] = os.path.join(out, m["output_path"].split(os.sep)[-1])
+                            Path(dst).write_text(json.dumps(m, ensure_ascii=False, indent=2), "utf-8")
+                    except Exception:
+                        pass
+            shutil.rmtree(job_dir, ignore_errors=True)
+            logger.info("pruned stale output dir: %s", job_dir)
+        except OSError:
+            pass
+
 @app.on_event("startup")
 async def startup_event():
     import threading
@@ -45,6 +80,7 @@ async def startup_event():
     from pipeline.step04_stt import preload_stt_model
     threading.Thread(target=preload_stt_model, daemon=True, name="stt-preloader").start()
     threading.Thread(target=_queue_worker_loop, daemon=True, name="queue-worker").start()
+    threading.Thread(target=_prune_stale_output_dirs, daemon=True, name="output-pruner").start()
 
     # ponytail: check required tools at startup
     import shutil

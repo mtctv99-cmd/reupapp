@@ -76,6 +76,7 @@
 [data-icon="lock"] { --icon: url("icons/lock.svg"); }
 [data-icon="circle-check"] { --icon: url("icons/circle-check.svg"); }
 [data-icon="smartphone"] { --icon: url("icons/smartphone.svg"); }
+[data-icon="qr-code"] { --icon: url("icons/qr-code.svg"); }
 [data-icon="cookie"] { --icon: url("icons/cookie.svg"); }
 [data-icon="save"] { --icon: url("icons/save.svg"); }
 [data-icon="plus"] { --icon: url("icons/plus.svg"); }
