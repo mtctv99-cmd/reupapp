@@ -93,26 +93,25 @@ async def _apply_speed(video_path: str, speed: float) -> str:
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=3600)
         if proc.returncode == 0 and os.path.exists(speed_path):
             return speed_path
-        # ponytail: audio stream missing — retry video-only
+        # ponytail: audio stream missing (hoặc lỗi filter audio) — retry video-only
         err_msg = stderr.decode("utf-8", errors="replace")[-500:] if stderr else ""
-        if "does not contain any stream" in err_msg or "Audio stream not found" in err_msg:
-            logger.warning("No audio stream in source, applying speed video-only")
-            cmd_video_only = [
-                ffmpeg_bin, "-y",
-                "-i", video_path,
-                "-filter_complex", f"[0:v]setpts=PTS/{speed}[v]",
-                "-map", "[v]",
-                *enc_args, "-pix_fmt", "yuv420p",
-                "-an",
-                speed_path
-            ]
-            proc2 = await asyncio.create_subprocess_exec(
-                *cmd_video_only, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                creationflags=_CREATION_FLAGS,
-            )
-            await asyncio.wait_for(proc2.communicate(), timeout=3600)
-            if proc2.returncode == 0 and os.path.exists(speed_path):
-                return speed_path
+        logger.warning("Speed pass failed (audio?), retrying video-only: %s", err_msg[:200])
+        cmd_video_only = [
+            ffmpeg_bin, "-y",
+            "-i", video_path,
+            "-filter_complex", f"[0:v]setpts=PTS/{speed}[v]",
+            "-map", "[v]",
+            *enc_args, "-pix_fmt", "yuv420p",
+            "-an",
+            speed_path
+        ]
+        proc2 = await asyncio.create_subprocess_exec(
+            *cmd_video_only, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            creationflags=_CREATION_FLAGS,
+        )
+        await asyncio.wait_for(proc2.communicate(), timeout=3600)
+        if proc2.returncode == 0 and os.path.exists(speed_path):
+            return speed_path
     except Exception as exc:
         logger.warning("Failed to apply speed %.2f adjustment: %s, fallback to original video", speed, exc)
     return video_path

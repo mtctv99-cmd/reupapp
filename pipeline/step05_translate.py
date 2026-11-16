@@ -367,14 +367,15 @@ async def _translate_openai(
     source_lang: str, target_lang: str,
     history: list[dict] | None = None, context: str | None = None,
 ) -> list[str] | None:
-    """OpenAI-compatible API (vd https://gemini.maika.sbs/v1) — retry 2 + cooldown.
+    """OpenAI-compatible API tự cấu hình — retry 2 + cooldown.
 
     ponytail: Batch splitting — send max 30 segments per request to avoid
     output token truncation on lightweight models (gemini-flash-lite).
     """
     import httpx
     if not url:
-        url = "https://gemini.maika.sbs/v1"
+        logger.warning("openai_compat tier thiếu url — bỏ qua")
+        return None
     url = url.rstrip("/")
     endpoint = f"{url}/chat/completions" if not url.endswith("/chat/completions") else url
 

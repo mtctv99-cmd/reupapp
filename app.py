@@ -456,6 +456,12 @@ async def api_jobs_create(payload: dict):
     source_lang = str(payload.get("source_lang", "zh")).strip()
     target_lang = str(payload.get("target_lang", "vi")).strip()
     voice = str(payload.get("voice", "")).strip()
+    if voice in ("BV074_streaming", "BV001_streaming"):
+        from core import tiktok as _tiktok
+        if not _tiktok.has_session():
+            return JSONResponse(
+                {"error": "Giọng CapCut cần đăng nhập tài khoản TikTok/CapCut trong Cài đặt. "
+                          "Chọn giọng Ngọc Huyền hoặc thêm tài khoản trước."}, 400)
     video_speed = float(payload.get("video_speed", 1.0))
     original_volume = int(payload.get("original_volume", 100))
     output_dir = str(payload.get("output_dir", "")).strip()
@@ -468,7 +474,7 @@ async def api_jobs_create(payload: dict):
         "aspect_ratio": payload.get("aspect_ratio", settings.get("aspect_ratio", "original")),
         "bg_style": payload.get("bg_style", settings.get("bg_style", "blur")),
         "bg_color": payload.get("bg_color", settings.get("bg_color", "black")),
-        "sub_style": payload.get("sub_style", settings.get("sub_style", "yellow_black")),
+        "sub_style": payload.get("sub_style", settings.get("sub_style", "white_black")),
         "sub_font_size": payload.get("sub_font_size", settings.get("sub_font_size", 38)),
         "logo_path": payload.get("logo_path", settings.get("logo_path", "")),
         "logo_position": payload.get("logo_position", settings.get("logo_position", "top_right")),
