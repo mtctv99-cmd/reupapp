@@ -216,11 +216,11 @@ def main():
     time.sleep(1.0)
 
     if _SERVER_ERROR:
+        from core.config import app_dir
         _show_error_box(
             "Lỗi khởi động máy chủ",
             f"Không thể khởi chạy dịch vụ backend:\n{_SERVER_ERROR}\n\n"
-            f"Vui lòng kiểm tra file log tại:\n%APPDATA%\\SeverDesktop\\sever.log\n"
-            f"Và đảm bảo máy đã cài đặt Microsoft Visual C++ Redistributable x64."
+            f"Log: {app_dir() / 'sever.log'}"
         )
         return
 

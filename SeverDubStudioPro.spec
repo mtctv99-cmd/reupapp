@@ -3,6 +3,21 @@ import os
 import rapidocr_onnxruntime
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
+_TARGET_OS = os.environ.get("SEVER_BUILD_OS", "windows").lower()
+if _TARGET_OS not in {"windows", "linux"}:
+    raise SystemExit("SEVER_BUILD_OS must be windows or linux")
+_IS_LINUX = _TARGET_OS == "linux"
+if _IS_LINUX and os.name != "posix":
+    raise SystemExit("Linux artifact must be built on Linux (native or WSL), not Windows")
+
+def _collect_webview_hiddenimports():
+    if _IS_LINUX:
+        return ['webview', 'webview.platforms.gtk']
+    return ['webview', 'webview.platforms.edgechromium', 'clr', 'pythonnet']
+
+_WEBVIEW_HIDDENIMPORTS = _collect_webview_hiddenimports()
+
+
 rapidocr_dir = os.path.dirname(rapidocr_onnxruntime.__file__)
 
 # ── Settings: luôn bundle bản mẫu trung tính (settings runtime nằm ở %APPDATA%) ──
@@ -17,7 +32,9 @@ _models_datas = []
 
 if not _BUILD_LITE:
     _candidate_dirs = [
+        os.path.join(os.environ['SEVER_DESKTOP_DIR'], 'models_cache', 'models') if os.environ.get('SEVER_DESKTOP_DIR') else '',
         os.path.join(os.environ.get('APPDATA', ''), 'SeverDesktop', 'models_cache', 'models'),
+        os.path.join(os.path.expanduser('~'), '.config', 'sever-desktop', 'models_cache', 'models'),
         os.path.join(os.path.expanduser('~'), '.cache', 'modelscope', 'models'),
         os.path.join(os.path.expanduser('~'), '.cache', 'modelscope', 'hub', 'models'),
         os.path.join(os.path.expanduser('~'), '.cache', 'modelscope', 'hub'),
@@ -50,13 +67,24 @@ if os.path.exists(os.path.join(rapidocr_dir, 'config.yaml')):
 if os.path.exists(os.path.join(rapidocr_dir, 'models')):
     _rapidocr_datas.append((os.path.join(rapidocr_dir, 'models'), 'rapidocr_onnxruntime/models'))
 
-# ── Binaries Data (Tùy chọn: nếu NO_BIN=1 thì app tự tải về %APPDATA%/SeverDesktop/bin) ──
+# ── Binaries Data (Tùy chọn: nếu NO_BIN=1 thì app tự tải về app_dir/bin) ──
 _NO_BIN = os.environ.get("NO_BIN", "0") == "1"
 _bin_datas = []
-if not _NO_BIN:
+_bin_binaries = []
+if not _NO_BIN and not _IS_LINUX:
     for _b in ('bin/ffmpeg.exe', 'bin/ffprobe.exe', 'bin/yt-dlp.exe', 'bin/BBDown.exe'):
         if os.path.exists(_b):
             _bin_datas.append((_b, 'bin'))
+# Linux uses distro-managed ffmpeg/ffprobe and pip yt-dlp; setup-linux.sh installs them.
+if _IS_LINUX:
+    import shutil as _shutil
+    _missing_linux_tools = [n for n in ('ffmpeg', 'ffprobe', 'yt-dlp') if not _shutil.which(n)]
+    if _missing_linux_tools:
+        raise SystemExit("Missing Linux tools: " + ", ".join(_missing_linux_tools) + ". Run setup-linux.sh")
+    # FFmpeg and yt-dlp come from OS packages, not copied shebang launchers.
+    if not _shutil.which('gobject-introspection') and not os.path.exists('/usr/lib/python3/dist-packages/gi'):
+        raise SystemExit("PyGObject/GTK not found; run setup-linux.sh")
+
 
 # ── Piper TTS Data & Local Voice Models ──
 _piper_datas = collect_data_files('piper')
@@ -75,17 +103,19 @@ _piper_submodules = [s for s in collect_submodules('piper') if not s.startswith(
 a = Analysis(
     ['run.py'],
     pathex=[],
-    binaries=[],
+    binaries=_bin_binaries,
     datas=[
         ('src', 'src'),
         (_settings_src, '.'),
     ] + _bin_datas + _playwright_datas + _rapidocr_datas + _models_datas + _piper_datas + collect_data_files('funasr') + collect_data_files('modelscope'),
     hiddenimports=[
+        *_WEBVIEW_HIDDENIMPORTS,
+        *(['gi', 'gi.repository', 'gi.repository.Gtk', 'gi.repository.WebKit2'] if _IS_LINUX else []),
+        *(['rubicon'] if _IS_LINUX else []),
         # uvicorn
         'uvicorn.logging', 'uvicorn.loops.auto', 'uvicorn.protocols.http.auto',
         'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan.on',
         # pywebview
-        'webview', 'webview.platforms.edgechromium', 'clr', 'pythonnet',
         # OCR
         'rapidocr_onnxruntime', 'onnxruntime',
         # FunASR + torch
@@ -124,7 +154,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,
+    console=_IS_LINUX,
     disable_windowed_traceback=False,
 )
 coll = COLLECT(

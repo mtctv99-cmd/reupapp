@@ -17,7 +17,8 @@ def get_bin_dir() -> Path | None:
         base = Path(sys._MEIPASS)
     else:
         base = Path(__file__).parent.parent
-    for sub in ("bin", Path("_internal") / "bin"):
+    subs = ("_internal/bin", "bin") if sys.platform.startswith("linux") and getattr(sys, "frozen", False) else ("bin", Path("_internal") / "bin")
+    for sub in subs:
         p = base / sub
         if p.exists() and p.is_dir():
             return p
@@ -83,7 +84,9 @@ def app_dir() -> Path:
 
 
 def _get_settings_file_path() -> Path:
-    """Khi frozen (EXE): Ưu tiên lưu settings.json ngay cạnh file EXE. Nếu không ghi được thì dùng %APPDATA%."""
+    """Frozen Windows may store settings beside EXE; Linux uses writable app config dir."""
+    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
+        return app_dir() / "settings.json"
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).parent
         local_cfg = exe_dir / "settings.json"
@@ -143,6 +146,7 @@ class Settings:
         self._load()
 
     def _load(self) -> None:
+        import shutil
         ensure_env_paths()
         p = _get_settings_file_path()
         merged = _defaults()
@@ -159,12 +163,29 @@ class Settings:
         # ponytail: Luôn ưu tiên tìm binary nhúng sẵn (_internal/bin) trước, tránh dán cứng đường dẫn tuyệt đối của máy dev
         for key in ("ffmpeg_path", "ffprobe_path", "ytdlp_path", "bbdown_path"):
             val = merged.get(key, "")
+            if sys.platform.startswith("linux") and key == "bbdown_path":
+                merged[key] = "BBDown"  # BBDown is Windows-only; direct API -> yt-dlp fallback remains.
+                continue
+            if sys.platform.startswith("linux") and key == "ytdlp_path":
+                merged[key] = "yt-dlp"
+                continue
             bare = Path(val).stem.lower() if val else key.split("_")[0]
             bundled = _bundled_bin(bare)
             if bundled:
                 merged[key] = bundled
-            elif not val or not Path(val).exists():
+            elif not val or not Path(val).exists() or (os.name != "nt" and val.lower().endswith(".exe")):
                 merged[key] = bare
+        if sys.platform.startswith("linux"):
+            import shutil
+            if shutil.which("yt-dlp"):
+                merged["ytdlp_path"] = shutil.which("yt-dlp")
+            elif not merged.get("ytdlp_path") or merged["ytdlp_path"].lower().endswith(".exe"):
+                merged["ytdlp_path"] = "yt-dlp"
+            for key in ("ffmpeg_path", "ffprobe_path"):
+                if shutil.which(key.removesuffix("_path")):
+                    merged[key] = shutil.which(key.removesuffix("_path"))
+                elif str(merged.get(key, "")).lower().endswith(".exe"):
+                    merged[key] = key.removesuffix("_path")
 
         # Chuẩn hóa download_dir và output_dir: nếu rỗng hoặc trỏ tới thư mục không tồn tại của máy khác -> dùng app_dir()
         for d_key in ("download_dir", "output_dir"):

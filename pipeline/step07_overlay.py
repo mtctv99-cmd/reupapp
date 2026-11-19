@@ -145,7 +145,7 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
         # Use forward slashes + escape colons and backslashes/quotes for FFmpeg filter syntax
         clean_ass = ass_path.replace("\\", "/")
         clean_ass = clean_ass.replace("'", "'\\''")
-        if len(clean_ass) > 2 and clean_ass[1] == ":":
+        if os.name == "nt" and len(clean_ass) > 2 and clean_ass[1] == ":":
             clean_ass = clean_ass[0] + "\\:" + clean_ass[2:]
         next_v = "[vsub]"
         v_chains.append(f"{curr_v}subtitles=filename=\\'{clean_ass}\\':original_size={orig_w}x{orig_h}{next_v}")

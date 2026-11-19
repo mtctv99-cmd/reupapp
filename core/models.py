@@ -34,34 +34,42 @@ MODELS_LIST = [
     },
 ]
 
-BINARIES_CONFIG = [
-    {
-        "name": "yt-dlp.exe",
-        "url": "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe",
-        "approx_mb": 18,
-    },
-    {
-        "name": "BBDown.exe",
-        "url": "https://github.com/nilaoda/BBDown/releases/download/1.6.3/BBDown_1.6.3_20240814_win-x64.zip",
-        "is_zip": True,
-        "extract_file": "BBDown.exe",
-        "approx_mb": 18,
-    },
-    {
-        "name": "ffmpeg.exe",
-        "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
-        "is_zip": True,
-        "extract_file": "bin/ffmpeg.exe",
-        "approx_mb": 100,
-    },
-    {
-        "name": "ffprobe.exe",
-        "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
-        "is_zip": True,
-        "extract_file": "bin/ffprobe.exe",
-        "approx_mb": 100,
-    },
-]
+if os.name == "nt":
+    BINARIES_CONFIG = [
+        {
+            "name": "yt-dlp.exe",
+            "url": "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe",
+            "approx_mb": 18,
+        },
+        {
+            "name": "BBDown.exe",
+            "url": "https://github.com/nilaoda/BBDown/releases/download/1.6.3/BBDown_1.6.3_20240814_win-x64.zip",
+            "is_zip": True,
+            "extract_file": "BBDown.exe",
+            "approx_mb": 18,
+        },
+        {
+            "name": "ffmpeg.exe",
+            "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+            "is_zip": True,
+            "extract_file": "bin/ffmpeg.exe",
+            "approx_mb": 100,
+        },
+        {
+            "name": "ffprobe.exe",
+            "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+            "is_zip": True,
+            "extract_file": "bin/ffprobe.exe",
+            "approx_mb": 100,
+        },
+    ]
+else:
+    BINARIES_CONFIG = [
+        {"name": "ffmpeg", "approx_mb": 0},
+        {"name": "ffprobe", "approx_mb": 0},
+        {"name": "yt-dlp", "approx_mb": 0},
+    ]
+
 
 # ── Piper TTS voice (tải từ GitHub Release của app) ──
 PIPER_VOICE = "ngoc_huyen"
@@ -86,6 +94,8 @@ def get_piper_dir() -> Path:
                      meipass / "_internal" / "models" / "piper" / PIPER_VOICE):
             if cand.exists():
                 return cand
+    if os.name != "nt" and (Path(__file__).parent.parent / "models" / "piper" / PIPER_VOICE).exists():
+        return Path(__file__).parent.parent / "models" / "piper" / PIPER_VOICE
     return app_dir() / "models" / "piper" / PIPER_VOICE
 
 
@@ -173,29 +183,47 @@ def get_app_bin_dir() -> Path:
 
 
 def check_binaries_installed() -> dict[str, Any]:
-    """Kiểm tra xem ffmpeg, ffprobe, yt-dlp, BBDown đã có đủ chưa."""
+    """Check required media/download tools in app bundle or PATH."""
+    import shutil
     from core.config import get_bin_dir
     bin_dir = get_bin_dir()
-    required = ["ffmpeg.exe", "ffprobe.exe", "yt-dlp.exe", "BBDown.exe"]
+    required = [item["name"] for item in BINARIES_CONFIG]
     missing = []
-    
-    if bin_dir and bin_dir.exists():
-        for req in required:
-            if not (bin_dir / req).exists() and not (bin_dir / req.replace(".exe", "")).exists():
-                missing.append(req)
-    else:
-        missing = required
+    for name in required:
+        bare = name.removesuffix(".exe")
+        candidates = (name, bare) if os.name == "nt" else (bare,)
+        bundled = any((bin_dir / candidate).is_file() for candidate in candidates) if bin_dir else False
+        if not bundled and not any(shutil.which(candidate) for candidate in candidates):
+            missing.append(name)
+    where = str(bin_dir) if bin_dir else str(get_app_bin_dir())
+    if os.name != "nt":
+        return {"ready": not missing, "missing": missing, "bin_dir": where}
+    return {"ready": not missing, "missing": missing, "bin_dir": where}
 
-    return {
-        "ready": len(missing) == 0,
-        "missing": missing,
-        "bin_dir": str(bin_dir) if bin_dir else str(get_app_bin_dir()),
-    }
+
+def _linux_missing_binaries() -> list[str]:
+    import shutil
+    return [name for name in ("ffmpeg", "ffprobe", "yt-dlp") if not shutil.which(name)]
+
+
+def _download_system_binaries(progress_cb: Callable[[str], None] | None = None) -> list[str]:
+    """Linux tools are provided by setup-linux.sh; do not fetch Windows binaries."""
+    errors = [f"{name} missing from PATH; run setup-linux.sh" for name in _linux_missing_binaries()]
+    if errors:
+        with _DOWNLOAD_LOCK:
+            DOWNLOAD_STATE["error"] = "; ".join(errors)
+    return errors
+
+
 
 
 def download_missing_binaries(progress_cb: Callable[[str], None] | None = None) -> list[str]:
-    """Tải các binary còn thiếu. Lỗi từng món không chặn món khác; trả về danh sách lỗi."""
+    """Tải các binary trên Windows; Linux dùng apt/setup-linux.sh."""
+    if os.name != "nt":
+        return _download_system_binaries(progress_cb)
+
     target_dir = get_app_bin_dir()
+
     errors: list[str] = []
     zip_cache: dict[str, Path] = {}
 

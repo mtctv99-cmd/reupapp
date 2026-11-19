@@ -18,6 +18,7 @@
 - Microsoft Edge hoặc Google Chrome (dùng cho đăng nhập CapCut/Google; thiếu thì setup tự cài Chromium)
 - FFmpeg / ffprobe / yt-dlp / BBDown — app tự tải ở lần chạy đầu
 - Model AI FunASR (~2 GB) + giọng Piper `ngoc_huyen` (~63 MB) — app tự tải ở lần chạy đầu
+- Ubuntu 24.04: `./setup-linux.sh`, `./run-linux.sh`; Linux build native bằng `./BUILD_LINUX.sh`. Cần GTK3 + WebKitGTK 4.1, FFmpeg, Chromium/Playwright. `BBDown` và pywebview Edge backend là Windows-only; Linux dùng direct Bilibili/yt-dlp và WebKitGTK.
 
 ## Cài đặt
 
@@ -44,8 +45,9 @@ Hoặc chạy riêng backend để mở bằng trình duyệt:
 
 ## Build
 
-- `BUILD_LITE.bat` — bản nhẹ, không kèm model AI.
-- `BUILD_FULL.bat` — bản offline đầy đủ: kèm FunASR models, Piper voice, binaries, đóng gói bằng Inno Setup.
+- `BUILD_LITE.bat` — Windows bản nhẹ, không kèm model AI.
+- `BUILD_FULL.bat` — Windows bản offline: kèm FunASR models, Piper voice, binaries, đóng gói Inno Setup.
+- Ubuntu: chạy `./setup-linux.sh`, rồi `./BUILD_LINUX.sh`. Output `dist/SeverDubStudioPro/` là bundle native Linux (one-folder), không phải `.deb`. `BUILD_LINUX_DOCKER.sh` cần Docker có thể truy cập Ubuntu apt repositories.
 
 ## Cấu trúc
 

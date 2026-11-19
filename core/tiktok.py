@@ -134,9 +134,10 @@ def login_blocking(slot: str = "", timeout_sec: int = 300) -> str | None:
 
     user_data_dir = str(_profile_dir(slot or f"acc{len(list_accounts()) + 1}"))
     with sync_playwright() as p:
-        # Thử mở qua Microsoft Edge có sẵn trên Windows, fallback về Chrome / default
+        # Windows: Edge/Chrome; Linux: installed Chromium, then Playwright Chromium.
         ctx = None
-        for channel in ("msedge", "chrome", None):
+        channels = ("msedge", "chrome", None) if sys.platform == "win32" else ("chrome", None)
+        for channel in channels:
             try:
                 launch_kwargs = {
                     "user_data_dir": user_data_dir,

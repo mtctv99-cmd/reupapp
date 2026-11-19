@@ -112,7 +112,8 @@ def login_blocking(timeout_sec: int = 300) -> str | None:
     user_data_dir = str(_profile_dir())
     with sync_playwright() as p:
         ctx = None
-        for channel in ("msedge", "chrome", None):
+        channels = ("msedge", "chrome", None) if sys.platform == "win32" else ("chrome", None)
+        for channel in channels:
             try:
                 kwargs = {
                     "user_data_dir": user_data_dir,
