@@ -25,6 +25,13 @@ mkdir -p dist/SeverDubStudioPro/models/piper
 cp -a models/piper/ngoc_huyen dist/SeverDubStudioPro/models/piper/
 cp app.py run.py settings.example.json dist/SeverDubStudioPro/
 cp -a .build-linux-config/models_cache dist/SeverDubStudioPro/
+# yt-dlp standalone: bundle so fresh Ubuntu machines need no system install
+if [[ -f assets/yt-dlp-linux ]]; then
+  mkdir -p dist/SeverDubStudioPro/_internal/bin dist/SeverDubStudioPro/bin
+  cp -a assets/yt-dlp-linux dist/SeverDubStudioPro/_internal/bin/yt-dlp
+  cp -a assets/yt-dlp-linux dist/SeverDubStudioPro/bin/yt-dlp
+  chmod +x dist/SeverDubStudioPro/_internal/bin/yt-dlp dist/SeverDubStudioPro/bin/yt-dlp
+fi
 chmod +x dist/SeverDubStudioPro/setup-linux.sh dist/SeverDubStudioPro/run-linux.sh
 
 echo "Linux bundle built at dist/SeverDubStudioPro/"

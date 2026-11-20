@@ -187,7 +187,7 @@ class Settings:
                 merged[key] = "BBDown"  # BBDown is Windows-only; direct API -> yt-dlp fallback remains.
                 continue
             if sys.platform.startswith("linux") and key == "ytdlp_path":
-                merged[key] = "yt-dlp"
+                merged[key] = _bundled_bin("yt-dlp") or "yt-dlp"
                 continue
             bare = Path(val).stem.lower() if val else key.split("_")[0]
             bundled = _bundled_bin(bare)
