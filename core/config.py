@@ -64,6 +64,21 @@ def ensure_env_paths() -> None:
         pass
 
 
+def bundled_asset(name: str) -> str:
+    """Resolve a bundled asset (logo, car sprites) in source or frozen builds."""
+    if getattr(sys, "frozen", False):
+        bases = [Path(getattr(sys, "_MEIPASS", "")) / "assets", Path(sys.executable).parent / "assets"]
+    else:
+        bases = [Path(__file__).parent.parent / "assets"]
+    for base in bases:
+        if not base or not base.is_dir():
+            continue
+        p = base / name
+        if p.exists():
+            return str(p)
+    return ""
+
+
 def app_dir() -> Path:
     global _CONFIG_DIR
     if _CONFIG_DIR is None:
@@ -113,10 +128,15 @@ def _defaults() -> dict[str, Any]:
         "target_language": "vi",
         "remove_sub": True,
         "video_speed": 1.0,
-        "original_volume": 100,
+        "original_volume": 0,
         "aspect_ratio": "original",
-        "bg_style": "blur",
+        "bg_style": "crop",
         "bg_color": "black",
+        "video_zoom": 1.3,
+        "fit_mode": "crop",
+        "car_overlay": True,
+        "car_count": 3,
+        "car_size": 30,
         "logo_path": "",
         "logo_position": "top_right",
         "logo_opacity": 0.8,
@@ -195,7 +215,20 @@ class Settings:
                 fallback_d.mkdir(parents=True, exist_ok=True)
                 merged[d_key] = str(fallback_d)
 
+        # ponytail: one-time migration — existing installs get muted-original + zoom/crop default,
+        # but any later user edit to original_volume is preserved.
+        migrated = False
+        if not merged.get("_defaults_v2"):
+            merged["_defaults_v2"] = True
+            merged["original_volume"] = 0
+            merged["video_zoom"] = 1.3
+            merged["fit_mode"] = "crop"
+            merged["car_overlay"] = True
+            migrated = True
+
         self._data = merged
+        if migrated:
+            self.save()
 
     def save(self) -> None:
         _get_settings_file_path().write_text(json.dumps(self._data, indent=2, ensure_ascii=False), "utf-8")

@@ -106,6 +106,7 @@ a = Analysis(
     binaries=_bin_binaries,
     datas=[
         ('src', 'src'),
+        ('assets', 'assets'),
         (_settings_src, '.'),
     ] + _bin_datas + _playwright_datas + _rapidocr_datas + _models_datas + _piper_datas + collect_data_files('funasr') + collect_data_files('modelscope'),
     hiddenimports=[

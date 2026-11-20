@@ -20,6 +20,7 @@ output/
 *.wav
 *.ass
 *.png
+!assets/*.png
 *.jpg
 *.jpeg
 bin/

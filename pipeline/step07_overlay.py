@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.ffmpeg import _run as ffmpeg_run
-from core.config import settings
+from core.config import settings, bundled_asset
 
 logger = logging.getLogger(__name__)
 
@@ -76,17 +76,39 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
     # 1. Inputs — cắt trực tiếp tại đây: -ss/-t kèm re-encode cho seek chính xác,
     # bỏ được một lần chạy ffmpeg extract mỗi chunk.
     cmd = [ffmpeg, "-y", "-ss", f"{chunk['start']:.3f}", "-t", f"{duration:.3f}", "-i", video_path]
+    next_input_idx = 1
     tts_input_idx = 0
     if has_tts:
-        tts_input_idx = 1
+        tts_input_idx = next_input_idx
+        next_input_idx += 1
         cmd.extend(["-i", tts_master_path])
 
-    # ponytail: logo là input CUỐI để không đội index của TTS
+    # ponytail: logo mặc định là MTC Studio bundle; input CUỐI để không đội index của TTS
     logo_path = str(settings.get("logo_path", "") or "")
+    if not logo_path or not os.path.exists(logo_path):
+        logo_path = bundled_asset("mtc_studio_logo.png")
     logo_idx = 0
     if logo_path and os.path.exists(logo_path):
-        logo_idx = 2 if has_tts else 1
+        logo_idx = next_input_idx
+        next_input_idx += 1
         cmd.extend(["-i", logo_path])
+
+    # 2-3 xe nhỏ (~30px) chạy quanh khung hình, asset bundle
+    car_paths: list[str] = []
+    if bool(settings.get("car_overlay", True)):
+        try:
+            car_count = max(0, min(3, int(settings.get("car_count", 3))))
+        except (TypeError, ValueError):
+            car_count = 3
+        for name in ("car_yellow.png", "car_red.png", "car_cyan.png")[:car_count]:
+            p = bundled_asset(name)
+            if p and os.path.exists(p):
+                car_paths.append(p)
+    car_idxs: list[int] = []
+    for p in car_paths:
+        cmd.extend(["-loop", "1", "-framerate", "30", "-t", f"{duration:.3f}", "-i", p])
+        car_idxs.append(next_input_idx)
+        next_input_idx += 1
 
     fc_parts: list[str] = []
     v_chains = []
@@ -151,12 +173,18 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
         v_chains.append(f"{curr_v}subtitles=filename=\\'{clean_ass}\\':original_size={orig_w}x{orig_h}{next_v}")
         curr_v = next_v
 
-    # D. SCALE/PAD / BLUR BACKGROUND / CROP
-    # Áp dụng khi user chọn tỉ lệ khác; mặc định 'original' giữ nguyên 100% video gốc
+    # D. ZOOM + CROP-TO-FILL (default) / BLUR BACKGROUND / PAD
     aspect_ratio = str(settings.get("aspect_ratio", "original")).lower()
-    bg_style = str(settings.get("bg_style", "blur")).lower()
+    bg_style = str(settings.get("bg_style", "crop")).lower()
     bg_color = str(settings.get("bg_color", "black")).lower()
+    fit_mode = str(settings.get("fit_mode", "crop")).lower()
     pad_color = "white" if "white" in bg_color else "black"
+
+    try:
+        zoom = float(settings.get("video_zoom", 1.3))
+    except (TypeError, ValueError):
+        zoom = 1.3
+    zoom = max(1.0, min(3.0, zoom))
 
     target_w, target_h = 0, 0
     if "original" in aspect_ratio or not aspect_ratio:
@@ -168,7 +196,22 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
     elif "16:9" in aspect_ratio:
         target_w, target_h = 1280, 720
 
-    if target_w > 0 and target_h > 0:
+    out_w, out_h = max(4, (target_w or orig_w) // 2 * 2), max(4, (target_h or orig_h) // 2 * 2)
+
+    if "crop" in fit_mode or "crop" in bg_style or zoom > 1.001:
+        # ponytail: zoom 1.3 + crop-to-fill — crop center rồi scale lấp đầy khung, không letterbox
+        chain = curr_v
+        if zoom > 1.001:
+            zw = max(4, int(orig_w / zoom) // 2 * 2)
+            zh = max(4, int(orig_h / zoom) // 2 * 2)
+            chain += f"crop=w={zw}:h={zh}:x=(iw-ow)/2:y=(ih-oh)/2,"
+        chain += (
+            f"scale=w={out_w}:h={out_h}:force_original_aspect_ratio=increase,"
+            f"crop=w={out_w}:h={out_h}:x=(iw-ow)/2:y=(ih-oh)/2,setsar=1[vzoom]"
+        )
+        v_chains.append(chain)
+        curr_v = "[vzoom]"
+    elif target_w > 0 and target_h > 0:
         zoom_out = "[vzoom]"
         is_source_9_16 = (orig_w > 0 and orig_h > 0 and abs((orig_w / orig_h) - (9 / 16)) < 0.08)
         if bg_style == "blur":
@@ -217,6 +260,32 @@ async def overlay_chunk(video_path: str, chunk: dict, regions: list[dict],
             f"{curr_v}[lg]overlay={xy}{next_v}"
         )
         curr_v = next_v
+
+    # F. XE NHỎ CHẠY QUANH KHUNG — 3 cạnh: trên (trái→phải), phải (trên→dưới), dưới (phải→trái)
+    if car_idxs:
+        try:
+            car_size = max(16, min(80, int(settings.get("car_size", 30))))
+        except (TypeError, ValueError):
+            car_size = 30
+        speeds = (70, 55, 85)
+        phases = (0.0, 2.5, 5.0)
+        m = 14
+        for n, idx in enumerate(car_idxs):
+            flip = ",hflip" if n == 2 else ""
+            tag = f"[car{n}s]"
+            v_chains.append(f"[{idx}:v]scale={car_size}:-1,format=rgba{flip}{tag}")
+            if n == 0:
+                x = f"'mod(t*{speeds[0]}+{phases[0]},W+w)-w'"
+                y = str(m)
+            elif n == 1:
+                x = f"W-w-{m}"
+                y = f"'mod(t*{speeds[1]}+{phases[1]},H+h)-h'"
+            else:
+                x = f"'W-mod(t*{speeds[2]}+{phases[2]},W+w)'"
+                y = f"H-h-{m}"
+            nxt = f"[vcar{n}]"
+            v_chains.append(f"{curr_v}{tag}overlay=x={x}:y={y}:format=auto:shortest=0{nxt}")
+            curr_v = nxt
 
     if v_chains:
         fc_parts.append(";".join(v_chains))
